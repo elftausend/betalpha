@@ -5,6 +5,10 @@ use std::{
 };
 
 use bytes::{Buf, BytesMut};
+use flate2::{
+    write::{DeflateEncoder, GzEncoder, ZlibEncoder},
+    Compression,
+};
 use nbt::{Blob, Value};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -30,6 +34,7 @@ fn base36_to_base10(input: i8) -> i32 {
 fn test_base_conv() {
     assert_eq!(base36_to_base10(18), 44);
     println!("base: {}", base36_to_base10(-127));
+    println!("{}", (12 << 4));
 }
 
 pub struct Chunk {
@@ -47,7 +52,7 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:25565").await.unwrap();
 
     let mut chunks = Vec::new();
-    for entry in walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World2/") {
+    for entry in walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/").into_iter() {
         let entry = entry.unwrap();
         let useable_filename = entry.path().file_name().unwrap().to_str().unwrap(); // thx rust
         if useable_filename.ends_with(".dat") && !useable_filename.ends_with("level.dat") {
@@ -110,7 +115,6 @@ async fn main() {
                 .iter()
                 .map(|x| x.to_be_bytes()[0])
                 .collect::<Vec<_>>();
-
             chunks.push(Chunk {
                 chunk_x,
                 chunk_z,
@@ -202,7 +206,11 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
 }
 
 // add checking with peak (faster)
-async fn parse_packet(stream: &mut TcpStream, buf: &BytesMut, chunks: &[Chunk]) -> Result<usize, Error> {
+async fn parse_packet(
+    stream: &mut TcpStream,
+    buf: &BytesMut,
+    chunks: &[Chunk],
+) -> Result<usize, Error> {
     let mut buf = Cursor::new(&buf[..]);
 
     let packet_id = get_u8(&mut buf)?;
@@ -211,6 +219,11 @@ async fn parse_packet(stream: &mut TcpStream, buf: &BytesMut, chunks: &[Chunk]) 
     println!("buf: {buf:?}");
 
     match packet_id {
+        0 => {
+            let packet = vec![0];
+            stream.write_all(&packet).await.unwrap();
+            stream.flush().await.unwrap();
+        }
         1 => {
             let protocol_version = get_i32(&mut buf)?;
             skip(&mut buf, 1)?;
@@ -219,7 +232,8 @@ async fn parse_packet(stream: &mut TcpStream, buf: &BytesMut, chunks: &[Chunk]) 
             let _password = get_string(&mut buf)?;
 
             let entity_id = 1337i32;
-            let seed = 31423422i64;
+            // let seed = 1111423422i64;
+            let seed: i64 = -4264101711260417039;
             let dimension = 0i8; // -1 hell
 
             let mut packet = vec![1];
@@ -237,8 +251,8 @@ async fn parse_packet(stream: &mut TcpStream, buf: &BytesMut, chunks: &[Chunk]) 
 
             println!("protocol_version {protocol_version}");
             println!("username {username}");
-            
-            for chunk in chunks {
+
+            for chunk in chunks.iter() {
                 let mut pre_chunk = vec![0x32];
                 pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
                 pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
@@ -246,13 +260,101 @@ async fn parse_packet(stream: &mut TcpStream, buf: &BytesMut, chunks: &[Chunk]) 
 
                 stream.write_all(&pre_chunk).await.unwrap();
                 stream.flush().await.unwrap();
+
+                let mut map_chunk = vec![0x33];
+                let x = chunk.chunk_x << 4;
+                let y = 0i16;
+                let z = chunk.chunk_z << 4;
+                // println!("cx: {}, cz: {}, x: {x}, z: {z}", chunk.chunk_x, chunk.chunk_z);
+                map_chunk.extend_from_slice(&x.to_be_bytes());
+                map_chunk.extend_from_slice(&y.to_be_bytes());
+                map_chunk.extend_from_slice(&z.to_be_bytes());
+
+                map_chunk.extend_from_slice(&15i32.to_be_bytes());
+                map_chunk.extend_from_slice(&127i32.to_be_bytes());
+                map_chunk.extend_from_slice(&15i32.to_be_bytes());
+
+                let mut to_compress = chunk.blocks.clone();
+                to_compress.extend_from_slice(&chunk.data);
+                to_compress.extend_from_slice(&chunk.block_light);
+                to_compress.extend_from_slice(&chunk.sky_light);
+
+                assert_eq!(to_compress.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
+
+                let mut e = DeflateEncoder::new(Vec::new(), Compression::default());
+                e.write_all(&to_compress).unwrap();
+
+                let compressed_bytes = e.finish().unwrap();
+
+                // let compressed_bytes = deflate::deflate_bytes_conf(&to_compress, deflate::Compression::Fast);
+                // map_chunk.extend_from_slice(&[0 ]);
+                // let compressed_bytes = deflate::deflate_bytes(&to_compress);
+                map_chunk.extend_from_slice(&(compressed_bytes.len() as i32).to_be_bytes());
+                map_chunk.extend_from_slice(&compressed_bytes);
+
+                stream.write_all(&map_chunk).await.unwrap();
+                stream.flush().await.unwrap();
             }
+            println!("sent map");
+
+            // -56.277393,65.62,70.65869
+            let x = -56i32;
+            let y = 65i32;
+            let z = 70i32;
+            let mut spawn_position = vec![0x06];
+            spawn_position.extend_from_slice(&x.to_be_bytes());
+            spawn_position.extend_from_slice(&y.to_be_bytes());
+            spawn_position.extend_from_slice(&z.to_be_bytes());
+                
+            stream.write_all(&spawn_position).await.unwrap();
+            stream.flush().await.unwrap();
+
+            println!("sent spawn");
+
+            for id in 1..3 {
+                let id: i32 = -1 * id;
+                let count: i16 = 0;
+                let mut player_inventory = vec![0x05];
+                player_inventory.extend_from_slice(&id.to_be_bytes());
+                player_inventory.extend_from_slice(&count.to_be_bytes());
+                player_inventory.extend_from_slice(&[0, 0]);
+                
+                stream.write_all(&player_inventory).await.unwrap();
+                stream.flush().await.unwrap();
+            }
+
+            println!("sent inv");
+
+            let x = -56.27f64;
+            let y = 65.62f64;
+            let z = 70.65f64;
+            let stance: f64 = y+1.5;
+
+            let yaw = 0f32;
+            let pitch = 0f32;
+
+            let on_ground = false;
+
+            let mut position_look = vec![0x0D];
+            position_look.extend_from_slice(&x.to_be_bytes());
+            position_look.extend_from_slice(&stance.to_be_bytes());
+            position_look.extend_from_slice(&y.to_be_bytes());
+            position_look.extend_from_slice(&z.to_be_bytes());
+            
+            position_look.extend_from_slice(&yaw.to_be_bytes());
+            position_look.extend_from_slice(&pitch.to_be_bytes());
+            position_look.extend_from_slice(&[on_ground as u8]);
+
+            stream.write_all(&position_look).await.unwrap();
+            stream.flush().await.unwrap();
+            println!("sent pos");
         }
         2 => {
             skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
             let ch = ClientHandshake { username };
             stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
+            stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
         _ => {}
