@@ -6,10 +6,12 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 use flate2::{
+    read::GzDecoder,
     write::{DeflateEncoder, GzEncoder, ZlibEncoder},
     Compression,
 };
 use nbt::{Blob, Value};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -51,13 +53,23 @@ pub struct Chunk {
 async fn main() {
     let listener = TcpListener::bind("0.0.0.0:25565").await.unwrap();
 
-    let mut chunks = Vec::new();
-    for entry in walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/").into_iter() {
-        let entry = entry.unwrap();
-        let useable_filename = entry.path().file_name().unwrap().to_str().unwrap(); // thx rust
-        if useable_filename.ends_with(".dat") && !useable_filename.ends_with("level.dat") {
+    // let mut chunks = Vec::new();
+    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    // 1. use rayon, 2. try valence_nbt for maybe improved performance?
+    let chunks = dirs
+        .par_iter()
+        .filter_map(|entry| {
+            let entry = entry.as_ref().unwrap();
+            let useable_filename = entry.path().file_name().unwrap().to_str().unwrap(); // thx rust
+            if !useable_filename.ends_with(".dat") || useable_filename.ends_with("level.dat") {
+                return None;
+            };
             println!("entry path: {:?}", entry.path());
             let mut file = std::fs::File::open(entry.path()).unwrap();
+
             let blob: Blob = nbt::from_gzip_reader(&mut file).unwrap();
 
             let Value::Compound(level) = &blob["Level"] else {
@@ -115,7 +127,8 @@ async fn main() {
                 .iter()
                 .map(|x| x.to_be_bytes()[0])
                 .collect::<Vec<_>>();
-            chunks.push(Chunk {
+
+            Some(Chunk {
                 chunk_x,
                 chunk_z,
                 blocks,
@@ -124,8 +137,8 @@ async fn main() {
                 block_light,
                 height_map,
             })
-        }
-    }
+        })
+        .collect::<Vec<_>>();
 
     let chunks = &*Box::leak(chunks.into_boxed_slice());
 
@@ -252,43 +265,47 @@ async fn parse_packet(
             println!("protocol_version {protocol_version}");
             println!("username {username}");
 
+
             for chunk in chunks.iter() {
                 let mut pre_chunk = vec![0x32];
                 pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
                 pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
-                pre_chunk.extend_from_slice(&[1]);
+                pre_chunk.extend_from_slice(&[1u8]);
 
                 stream.write_all(&pre_chunk).await.unwrap();
                 stream.flush().await.unwrap();
 
                 let mut map_chunk = vec![0x33];
-                let x = chunk.chunk_x << 4;
+                let x = chunk.chunk_x * 16;
                 let y = 0i16;
-                let z = chunk.chunk_z << 4;
+                let z = chunk.chunk_z * 16;
                 // println!("cx: {}, cz: {}, x: {x}, z: {z}", chunk.chunk_x, chunk.chunk_z);
+                // map_chunk.extend_from_slice(&[0 ]);
                 map_chunk.extend_from_slice(&x.to_be_bytes());
                 map_chunk.extend_from_slice(&y.to_be_bytes());
                 map_chunk.extend_from_slice(&z.to_be_bytes());
 
-                map_chunk.extend_from_slice(&15i32.to_be_bytes());
-                map_chunk.extend_from_slice(&127i32.to_be_bytes());
-                map_chunk.extend_from_slice(&15i32.to_be_bytes());
+                map_chunk.extend_from_slice(&15u8.to_be_bytes());
+                map_chunk.extend_from_slice(&127u8.to_be_bytes());
+                map_chunk.extend_from_slice(&15u8.to_be_bytes());
+                // println!("map_chunk: {map_chunk:?}");
 
                 let mut to_compress = chunk.blocks.clone();
                 to_compress.extend_from_slice(&chunk.data);
                 to_compress.extend_from_slice(&chunk.block_light);
                 to_compress.extend_from_slice(&chunk.sky_light);
+                // to_compress.extend_from_slice(&chunk.height_map);
 
                 assert_eq!(to_compress.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
 
-                let mut e = DeflateEncoder::new(Vec::new(), Compression::default());
-                e.write_all(&to_compress).unwrap();
+                // let mut e = DeflateEncoder::new(Vec::new(), Compression::default());
+                // e.write_all(&to_compress).unwrap();
 
-                let compressed_bytes = e.finish().unwrap();
+                // let compressed_bytes = e.finish().unwrap();
 
                 // let compressed_bytes = deflate::deflate_bytes_conf(&to_compress, deflate::Compression::Fast);
                 // map_chunk.extend_from_slice(&[0 ]);
-                // let compressed_bytes = deflate::deflate_bytes(&to_compress);
+                let compressed_bytes = deflate::deflate_bytes(&to_compress);
                 map_chunk.extend_from_slice(&(compressed_bytes.len() as i32).to_be_bytes());
                 map_chunk.extend_from_slice(&compressed_bytes);
 
@@ -305,20 +322,19 @@ async fn parse_packet(
             spawn_position.extend_from_slice(&x.to_be_bytes());
             spawn_position.extend_from_slice(&y.to_be_bytes());
             spawn_position.extend_from_slice(&z.to_be_bytes());
-                
+
             stream.write_all(&spawn_position).await.unwrap();
             stream.flush().await.unwrap();
 
             println!("sent spawn");
 
-            for id in 1..3 {
+            for id in 1..=3 {
                 let id: i32 = -1 * id;
                 let count: i16 = 0;
                 let mut player_inventory = vec![0x05];
                 player_inventory.extend_from_slice(&id.to_be_bytes());
                 player_inventory.extend_from_slice(&count.to_be_bytes());
-                player_inventory.extend_from_slice(&[0, 0]);
-                
+
                 stream.write_all(&player_inventory).await.unwrap();
                 stream.flush().await.unwrap();
             }
@@ -328,7 +344,7 @@ async fn parse_packet(
             let x = -56.27f64;
             let y = 65.62f64;
             let z = 70.65f64;
-            let stance: f64 = y+1.5;
+            let stance: f64 = y + 1.6;
 
             let yaw = 0f32;
             let pitch = 0f32;
@@ -337,10 +353,10 @@ async fn parse_packet(
 
             let mut position_look = vec![0x0D];
             position_look.extend_from_slice(&x.to_be_bytes());
-            position_look.extend_from_slice(&stance.to_be_bytes());
             position_look.extend_from_slice(&y.to_be_bytes());
+            position_look.extend_from_slice(&stance.to_be_bytes());
             position_look.extend_from_slice(&z.to_be_bytes());
-            
+
             position_look.extend_from_slice(&yaw.to_be_bytes());
             position_look.extend_from_slice(&pitch.to_be_bytes());
             position_look.extend_from_slice(&[on_ground as u8]);
