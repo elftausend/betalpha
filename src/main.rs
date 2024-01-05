@@ -1,12 +1,13 @@
 #![feature(read_buf)]
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Write},
+    io::{Cursor, Read, Write}, ptr::null_mut, mem::transmute,
 };
 
 use bytes::{Buf, BytesMut};
+use deflate::{deflate_bytes, deflate_bytes_zlib_conf};
 use flate2::{
-    read::GzDecoder,
+    read::{GzDecoder, ZlibDecoder},
     write::{DeflateEncoder, GzEncoder, ZlibEncoder},
     Compression,
 };
@@ -39,6 +40,131 @@ fn test_base_conv() {
     println!("{}", (12 << 4));
 }
 
+extern crate libz_sys;
+
+use libz_sys::{deflate, deflateInit_, deflateEnd, z_stream, Z_OK, Z_STREAM_END};
+
+fn test_libz() {
+    // libz_sys::compress(dest, destLen, source, sourceLen)
+    // Original data
+    let original_data = b"Hello, world!";
+/*
+    // Initialize the z_stream structure
+    let mut stream = z_stream {
+        next_in: original_data.as_ptr() as *mut _,
+        avail_in: original_data.len() as u32,
+        ..Default::default()
+    };
+
+    // Initialize the deflate stream
+    let mut ret = unsafe { deflateInit_(&mut stream, libz_sys::Z_DEFAULT_COMPRESSION) };
+    assert_eq!(ret, Z_OK);
+
+    // Buffer to hold compressed data
+    let mut compressed_data = vec![0u8; original_data.len() * 2];
+
+    // Set the output buffer
+    stream.next_out = compressed_data.as_mut_ptr() as *mut _;
+    stream.avail_out = compressed_data.len() as u32;
+
+    // Perform the compression
+    ret = unsafe { deflate(&mut stream, libz_sys::Z_FINISH) };
+    assert_eq!(ret, Z_STREAM_END);
+
+    // Clean up the deflate stream
+    ret = unsafe { deflateEnd(&mut stream) };
+    assert_eq!(ret, Z_OK);
+
+    // Resize the compressed_data vector to the actual size
+    compressed_data.resize((stream.next_out as usize - compressed_data.as_ptr() as usize) / std::mem::size_of::<u8>(), 0);
+
+    println!("Compressed data: {:?}", compressed_data);*/
+}
+
+
+#[test]
+fn test_x() -> std::io::Result<()> {
+    // Original data
+    let original_data = b"Hello, world!";
+
+    // Encoding (compressing) the data
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(original_data)?;
+    let compressed_data = encoder.finish()?;
+
+    // Decoding (decompressing) the data
+    let mut decoder = ZlibDecoder::new(compressed_data.as_slice());
+    let mut decompressed_data = vec![];
+    decoder.read_to_end(&mut decompressed_data).unwrap();
+
+    // Verify if the decompressed data matches the original data
+    assert_eq!(original_data, decompressed_data.as_slice());
+
+    Ok(())
+}
+
+
+#[test]
+fn test_compr() {
+    let data = std::fs::read_to_string("output.txt").unwrap();
+    let bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
+    for byte in &bytes {
+        print!("{byte:#02x} ");
+    }
+    let mut dec = ZlibDecoder::new(bytes.as_slice());
+    let mut decompressed = vec![];
+    dec.read_to_end(&mut decompressed).unwrap();
+    assert_eq!(decompressed.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
+
+    unsafe {
+
+        // let mut stream = z_stream {
+        //     next_in: null_mut(),
+        //     avail_in: Default::default(),
+        //     total_in: Default::default(),
+        //     next_out: null_mut(),
+        //     avail_out: Default::default(),
+        //     total_out: Default::default(),
+        //     msg: null_mut(),
+        //     state: null_mut(),
+        //     zalloc: |x, y, d| { null_mut() },
+        //     zfree: transmute(null_mut()),
+        //     opaque: null_mut(),
+        //     data_type: Default::default(),
+        //     adler: Default::default(),
+        //     reserved: Default::default(),
+        // };
+        
+        let mut len = libz_sys::compressBound(decompressed.len() as u64);
+
+        
+        println!("len: {len}");
+        let mut comp = vec![0u8; len as usize];
+        libz_sys::compress(comp.as_mut_ptr(), &mut len, decompressed.as_ptr(), decompressed.len() as u64);
+
+        println!("now: ");
+        for byte in &comp[..len as usize] {
+            print!("{byte:#02x} ");
+        }
+    }
+    // println!("comp: {comp:?}");
+
+    for i in 0..=10 {
+        let mut comp = ZlibEncoder::new(Vec::new(), Compression::new(i));
+        // ZlibEncoder::new_with_compress(w, compression);
+        comp.write_all(&decompressed).unwrap();
+        // comp.flush_finish();
+        let res = comp.flush_finish().unwrap();
+        // let res = deflate_bytes_zlib_conf(&decompressed, deflate::Compression::Default);
+        println!("b {}, r {}", bytes.len(), res.len());
+        if bytes.len() == res.len() {
+            println!("yo: {i}");
+        }
+        // assert_eq!(bytes.len(), res.len());
+
+    } 
+}
+
 pub struct Chunk {
     chunk_x: i32,
     chunk_z: i32,
@@ -54,7 +180,8 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:25565").await.unwrap();
 
     // let mut chunks = Vec::new();
-    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
+    // let dirs = walkdir::WalkDir::new("/home/elftausend/Downloads/mcserver/world/")
+    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World2/")
         .into_iter()
         .collect::<Vec<_>>();
 
@@ -72,8 +199,9 @@ async fn main() {
 
             let blob: Blob = nbt::from_gzip_reader(&mut file).unwrap();
 
-            let Value::Compound(level) = &blob["Level"] else {
-                panic!()
+            let Some(Value::Compound(level)) = &blob.get("Level") else {
+                println!("INFO: invalid path: {entry:?}");
+                return None;
             };
 
             let x = match level.get("xPos").unwrap() {
@@ -223,6 +351,7 @@ async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
     chunks: &[Chunk],
+    logged_in: &mut bool,
 ) -> Result<usize, Error> {
     let mut buf = Cursor::new(&buf[..]);
 
@@ -230,6 +359,11 @@ async fn parse_packet(
     println!("packet_id: {packet_id}");
 
     println!("buf: {buf:?}");
+
+    // remove later
+    if *logged_in {
+        return Ok(buf.remaining() as usize)
+    }
 
     match packet_id {
         0 => {
@@ -246,7 +380,8 @@ async fn parse_packet(
 
             let entity_id = 1337i32;
             // let seed = 1111423422i64;
-            let seed: i64 = -4264101711260417039;
+            let seed: i64 = 9065250152070435348;
+            // let seed: i64 = -4264101711260417039;
             let dimension = 0i8; // -1 hell
 
             let mut packet = vec![1];
@@ -265,7 +400,7 @@ async fn parse_packet(
             println!("protocol_version {protocol_version}");
             println!("username {username}");
 
-
+            *logged_in = true;
             for chunk in chunks.iter() {
                 let mut pre_chunk = vec![0x32];
                 pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
@@ -290,11 +425,11 @@ async fn parse_packet(
                 map_chunk.extend_from_slice(&15u8.to_be_bytes());
                 // println!("map_chunk: {map_chunk:?}");
 
+
                 let mut to_compress = chunk.blocks.clone();
                 to_compress.extend_from_slice(&chunk.data);
                 to_compress.extend_from_slice(&chunk.block_light);
                 to_compress.extend_from_slice(&chunk.sky_light);
-                // to_compress.extend_from_slice(&chunk.height_map);
 
                 assert_eq!(to_compress.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
 
@@ -306,6 +441,9 @@ async fn parse_packet(
                 // let compressed_bytes = deflate::deflate_bytes_conf(&to_compress, deflate::Compression::Fast);
                 // map_chunk.extend_from_slice(&[0 ]);
                 let compressed_bytes = deflate::deflate_bytes(&to_compress);
+                
+                let data = std::fs::read_to_string("output.txt").unwrap();
+                let compressed_bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
                 map_chunk.extend_from_slice(&(compressed_bytes.len() as i32).to_be_bytes());
                 map_chunk.extend_from_slice(&compressed_bytes);
 
@@ -316,7 +454,7 @@ async fn parse_packet(
 
             // -56.277393,65.62,70.65869
             let x = -56i32;
-            let y = 65i32;
+            let y = 80i32;
             let z = 70i32;
             let mut spawn_position = vec![0x06];
             spawn_position.extend_from_slice(&x.to_be_bytes());
@@ -328,12 +466,13 @@ async fn parse_packet(
 
             println!("sent spawn");
 
-            for id in 1..=3 {
-                let id: i32 = -1 * id;
-                let count: i16 = 0;
+            for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
                 let mut player_inventory = vec![0x05];
                 player_inventory.extend_from_slice(&id.to_be_bytes());
                 player_inventory.extend_from_slice(&count.to_be_bytes());
+                for _ in 0..count {
+                    player_inventory.extend_from_slice(&(-1i16).to_be_bytes());
+                }
 
                 stream.write_all(&player_inventory).await.unwrap();
                 stream.flush().await.unwrap();
@@ -342,14 +481,14 @@ async fn parse_packet(
             println!("sent inv");
 
             let x = -56.27f64;
-            let y = 65.62f64;
+            let y = 80.62f64;
             let z = 70.65f64;
             let stance: f64 = y + 1.6;
 
             let yaw = 0f32;
             let pitch = 0f32;
 
-            let on_ground = false;
+            let on_ground = true;
 
             let mut position_look = vec![0x0D];
             position_look.extend_from_slice(&x.to_be_bytes());
@@ -373,7 +512,9 @@ async fn parse_packet(
             stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
-        _ => {}
+        _ => {
+            return Ok(buf.remaining() as usize)
+        }
     }
 
     Ok(buf.position() as usize)
@@ -381,9 +522,9 @@ async fn parse_packet(
 
 async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
     let mut buf = BytesMut::with_capacity(SIZE);
-
+    let mut logged_in = false;
     loop {
-        if let Ok(n) = parse_packet(&mut stream, &buf, chunks).await {
+        if let Ok(n) = parse_packet(&mut stream, &buf, chunks, &mut logged_in).await {
             buf.advance(n);
             buf.clear(); // some fields in packets are ignored
         }
