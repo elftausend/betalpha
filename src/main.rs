@@ -1,7 +1,9 @@
 #![feature(read_buf)]
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Write}, ptr::null_mut, mem::transmute,
+    io::{Cursor, Read, Write},
+    mem::transmute,
+    ptr::null_mut,
 };
 
 use bytes::{Buf, BytesMut};
@@ -42,13 +44,13 @@ fn test_base_conv() {
 
 extern crate libz_sys;
 
-use libz_sys::{deflate, deflateInit_, deflateEnd, z_stream, Z_OK, Z_STREAM_END};
+use libz_sys::{deflate, deflateEnd, deflateInit_, z_stream, Z_OK, Z_STREAM_END};
 
 fn test_libz() {
     // libz_sys::compress(dest, destLen, source, sourceLen)
     // Original data
     let original_data = b"Hello, world!";
-/*
+    /*
     // Initialize the z_stream structure
     let mut stream = z_stream {
         next_in: original_data.as_ptr() as *mut _,
@@ -81,7 +83,6 @@ fn test_libz() {
     println!("Compressed data: {:?}", compressed_data);*/
 }
 
-
 #[test]
 fn test_x() -> std::io::Result<()> {
     // Original data
@@ -103,21 +104,31 @@ fn test_x() -> std::io::Result<()> {
     Ok(())
 }
 
-
 #[test]
 fn test_compr() {
     let data = std::fs::read_to_string("output.txt").unwrap();
-    let bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
+    let bytes = data
+        .split(' ')
+        .map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0])
+        .collect::<Vec<_>>();
     for byte in &bytes {
         print!("{byte:#02x} ");
     }
+
     let mut dec = ZlibDecoder::new(bytes.as_slice());
     let mut decompressed = vec![];
     dec.read_to_end(&mut decompressed).unwrap();
+
+    std::fs::write("input_bytes", &decompressed);
+
+    let mut file = std::fs::File::create("input").unwrap();
+    for val in &decompressed {
+        write!(&mut file, "{} ", *val as i8).unwrap();
+    }
+    // std::fs::write("input", &decompressed).unwrap();
     assert_eq!(decompressed.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
 
     unsafe {
-
         // let mut stream = z_stream {
         //     next_in: null_mut(),
         //     avail_in: Default::default(),
@@ -134,15 +145,19 @@ fn test_compr() {
         //     adler: Default::default(),
         //     reserved: Default::default(),
         // };
-        
+
         let mut len = libz_sys::compressBound(decompressed.len() as u64);
 
-        
         println!("len: {len}");
         let mut comp = vec![0u8; len as usize];
-        libz_sys::compress(comp.as_mut_ptr(), &mut len, decompressed.as_ptr(), decompressed.len() as u64);
+        libz_sys::compress(
+            comp.as_mut_ptr(),
+            &mut len,
+            decompressed.as_ptr(),
+            decompressed.len() as u64,
+        );
 
-        println!("now: ");
+        println!("now: {len:}");
         for byte in &comp[..len as usize] {
             print!("{byte:#02x} ");
         }
@@ -150,7 +165,7 @@ fn test_compr() {
     // println!("comp: {comp:?}");
 
     for i in 0..=10 {
-        let mut comp = ZlibEncoder::new(Vec::new(), Compression::new(i));
+        let mut comp = DeflateEncoder::new(Vec::new(), Compression::new(i));
         // ZlibEncoder::new_with_compress(w, compression);
         comp.write_all(&decompressed).unwrap();
         // comp.flush_finish();
@@ -161,8 +176,7 @@ fn test_compr() {
             println!("yo: {i}");
         }
         // assert_eq!(bytes.len(), res.len());
-
-    } 
+    }
 }
 
 pub struct Chunk {
@@ -181,7 +195,7 @@ async fn main() {
 
     // let mut chunks = Vec::new();
     // let dirs = walkdir::WalkDir::new("/home/elftausend/Downloads/mcserver/world/")
-    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World2/")
+    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
         .into_iter()
         .collect::<Vec<_>>();
 
@@ -312,6 +326,13 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
     Ok(src.get_u8())
 }
 
+fn get_u16(src: &mut Cursor<&[u8]>) -> Result<u16, Error> {
+    if !src.has_remaining() {
+        return Err(Error::Incomplete);
+    }
+    Ok(src.get_u16())
+}
+
 fn get_i8(src: &mut Cursor<&[u8]>) -> Result<i8, Error> {
     if !src.has_remaining() {
         return Err(Error::Incomplete);
@@ -331,7 +352,7 @@ fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, Error> {
         return Err(Error::Incomplete);
     }
 
-    let len = get_u8(src)?;
+    let len = get_u16(src)?;
     let string = String::from_utf8_lossy(&src.chunk()[..len as usize]).to_string();
     skip(src, len as usize)?;
     Ok(string)
@@ -362,7 +383,7 @@ async fn parse_packet(
 
     // remove later
     if *logged_in {
-        return Ok(buf.remaining() as usize)
+        return Ok(buf.remaining() as usize);
     }
 
     match packet_id {
@@ -373,9 +394,9 @@ async fn parse_packet(
         }
         1 => {
             let protocol_version = get_i32(&mut buf)?;
-            skip(&mut buf, 1)?;
+            // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
-            skip(&mut buf, 1)?;
+            // skip(&mut buf, 1)?;
             let _password = get_string(&mut buf)?;
 
             let entity_id = 1337i32;
@@ -425,7 +446,6 @@ async fn parse_packet(
                 map_chunk.extend_from_slice(&15u8.to_be_bytes());
                 // println!("map_chunk: {map_chunk:?}");
 
-
                 let mut to_compress = chunk.blocks.clone();
                 to_compress.extend_from_slice(&chunk.data);
                 to_compress.extend_from_slice(&chunk.block_light);
@@ -440,12 +460,25 @@ async fn parse_packet(
 
                 // let compressed_bytes = deflate::deflate_bytes_conf(&to_compress, deflate::Compression::Fast);
                 // map_chunk.extend_from_slice(&[0 ]);
-                let compressed_bytes = deflate::deflate_bytes(&to_compress);
-                
-                let data = std::fs::read_to_string("output.txt").unwrap();
-                let compressed_bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
-                map_chunk.extend_from_slice(&(compressed_bytes.len() as i32).to_be_bytes());
-                map_chunk.extend_from_slice(&compressed_bytes);
+                // let compressed_bytes = deflate::deflate_bytes(&to_compress);
+
+                unsafe {
+                    let mut len = libz_sys::compressBound(to_compress.len() as u64);
+                    let mut compressed_bytes = vec![0u8; len as usize];
+                    libz_sys::compress(
+                        compressed_bytes.as_mut_ptr(),
+                        &mut len,
+                        to_compress.as_ptr(),
+                        to_compress.len() as u64,
+                    );
+
+                    map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
+                    map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
+                }
+
+                // let data = std::fs::read("compressed_c_bytes").unwrap();
+                // let compressed_bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
+                // let compressed_bytes = data;
 
                 stream.write_all(&map_chunk).await.unwrap();
                 stream.flush().await.unwrap();
@@ -480,9 +513,9 @@ async fn parse_packet(
 
             println!("sent inv");
 
-            let x = -56.27f64;
+            let x = 0.27f64;
             let y = 80.62f64;
-            let z = 70.65f64;
+            let z = 0.65f64;
             let stance: f64 = y + 1.6;
 
             let yaw = 0f32;
@@ -505,16 +538,14 @@ async fn parse_packet(
             println!("sent pos");
         }
         2 => {
-            skip(&mut buf, 1)?;
+            // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
             let ch = ClientHandshake { username };
             stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
             stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
-        _ => {
-            return Ok(buf.remaining() as usize)
-        }
+        _ => return Ok(buf.remaining() as usize),
     }
 
     Ok(buf.position() as usize)
