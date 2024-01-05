@@ -1,18 +1,9 @@
 #![feature(read_buf)]
-use std::{
-    collections::HashMap,
-    io::{Cursor, Read, Write},
-    mem::transmute,
-    ptr::null_mut,
-};
+use std::io::{Cursor, Read, Write};
 
 use bytes::{Buf, BytesMut};
-use deflate::{deflate_bytes, deflate_bytes_zlib_conf};
-use flate2::{
-    read::{GzDecoder, ZlibDecoder},
-    write::{DeflateEncoder, GzEncoder, ZlibEncoder},
-    Compression,
-};
+
+
 use nbt::{Blob, Value};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
@@ -83,101 +74,7 @@ fn test_libz() {
     println!("Compressed data: {:?}", compressed_data);*/
 }
 
-#[test]
-fn test_x() -> std::io::Result<()> {
-    // Original data
-    let original_data = b"Hello, world!";
 
-    // Encoding (compressing) the data
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(original_data)?;
-    let compressed_data = encoder.finish()?;
-
-    // Decoding (decompressing) the data
-    let mut decoder = ZlibDecoder::new(compressed_data.as_slice());
-    let mut decompressed_data = vec![];
-    decoder.read_to_end(&mut decompressed_data).unwrap();
-
-    // Verify if the decompressed data matches the original data
-    assert_eq!(original_data, decompressed_data.as_slice());
-
-    Ok(())
-}
-
-#[test]
-fn test_compr() {
-    let data = std::fs::read_to_string("output.txt").unwrap();
-    let bytes = data
-        .split(' ')
-        .map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0])
-        .collect::<Vec<_>>();
-    for byte in &bytes {
-        print!("{byte:#02x} ");
-    }
-
-    let mut dec = ZlibDecoder::new(bytes.as_slice());
-    let mut decompressed = vec![];
-    dec.read_to_end(&mut decompressed).unwrap();
-
-    std::fs::write("input_bytes", &decompressed);
-
-    let mut file = std::fs::File::create("input").unwrap();
-    for val in &decompressed {
-        write!(&mut file, "{} ", *val as i8).unwrap();
-    }
-    // std::fs::write("input", &decompressed).unwrap();
-    assert_eq!(decompressed.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
-
-    unsafe {
-        // let mut stream = z_stream {
-        //     next_in: null_mut(),
-        //     avail_in: Default::default(),
-        //     total_in: Default::default(),
-        //     next_out: null_mut(),
-        //     avail_out: Default::default(),
-        //     total_out: Default::default(),
-        //     msg: null_mut(),
-        //     state: null_mut(),
-        //     zalloc: |x, y, d| { null_mut() },
-        //     zfree: transmute(null_mut()),
-        //     opaque: null_mut(),
-        //     data_type: Default::default(),
-        //     adler: Default::default(),
-        //     reserved: Default::default(),
-        // };
-
-        let mut len = libz_sys::compressBound(decompressed.len() as u64);
-
-        println!("len: {len}");
-        let mut comp = vec![0u8; len as usize];
-        libz_sys::compress(
-            comp.as_mut_ptr(),
-            &mut len,
-            decompressed.as_ptr(),
-            decompressed.len() as u64,
-        );
-
-        println!("now: {len:}");
-        for byte in &comp[..len as usize] {
-            print!("{byte:#02x} ");
-        }
-    }
-    // println!("comp: {comp:?}");
-
-    for i in 0..=10 {
-        let mut comp = DeflateEncoder::new(Vec::new(), Compression::new(i));
-        // ZlibEncoder::new_with_compress(w, compression);
-        comp.write_all(&decompressed).unwrap();
-        // comp.flush_finish();
-        let res = comp.flush_finish().unwrap();
-        // let res = deflate_bytes_zlib_conf(&decompressed, deflate::Compression::Default);
-        println!("b {}, r {}", bytes.len(), res.len());
-        if bytes.len() == res.len() {
-            println!("yo: {i}");
-        }
-        // assert_eq!(bytes.len(), res.len());
-    }
-}
 
 pub struct Chunk {
     chunk_x: i32,
@@ -194,8 +91,8 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:25565").await.unwrap();
 
     // let mut chunks = Vec::new();
-    // let dirs = walkdir::WalkDir::new("/home/elftausend/Downloads/mcserver/world/")
-    let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
+    let dirs = walkdir::WalkDir::new("./World2/")
+    // let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
         .into_iter()
         .collect::<Vec<_>>();
 
@@ -299,13 +196,6 @@ pub struct ClientHandshake {
     username: String,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ParseRule {
-    I32,
-    String,
-    I8,
-    U8,
-}
 
 pub enum Error {
     Incomplete,
@@ -345,6 +235,20 @@ fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, Error> {
         return Err(Error::Incomplete);
     }
     Ok(src.get_i32())
+}
+
+fn get_f32(src: &mut Cursor<&[u8]>) -> Result<f32, Error> {
+    if !src.has_remaining() {
+        return Err(Error::Incomplete);
+    }
+    Ok(src.get_f32())
+}
+
+fn get_f64(src: &mut Cursor<&[u8]>) -> Result<f64, Error> {
+    if !src.has_remaining() {
+        return Err(Error::Incomplete);
+    }
+    Ok(src.get_f64())
 }
 
 fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, Error> {
@@ -545,7 +449,34 @@ async fn parse_packet(
             stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
-        _ => return Ok(buf.remaining() as usize),
+
+        0x0B => {
+            let x = get_f64(&mut buf)?;
+            let y = get_f64(&mut buf)?;
+            let stance = get_f64(&mut buf)?;
+            let z = get_f64(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+            println!("{x} {y} {stance} {z} {on_ground}");
+        }
+
+        0x0C => {
+            let yaw = get_f32(&mut buf)?;
+            let pitch = get_f32(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+            println!("{yaw} {pitch} {on_ground}");
+        }
+
+        0x0D => {
+            let x = get_f64(&mut buf)?;
+            let y = get_f64(&mut buf)?;
+            let stance = get_f64(&mut buf)?;
+            let z = get_f64(&mut buf)?;
+            let yaw = get_f32(&mut buf)?;
+            let pitch = get_f32(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+            println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
+        }
+        _ => return Ok(0),
     }
 
     Ok(buf.position() as usize)
