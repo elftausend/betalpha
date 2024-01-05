@@ -1,4 +1,3 @@
-#![feature(read_buf)]
 use std::io::{Cursor, Read, Write};
 
 use bytes::{Buf, BytesMut};
