@@ -289,7 +289,7 @@ async fn parse_packet(
     let packet_id = get_u8(&mut buf)?;
     println!("packet_id: {packet_id}");
 
-    println!("buf: {buf:?}");
+    // println!("buf: {buf:?}");
 
     // remove later
     // if *logged_in {
@@ -297,12 +297,14 @@ async fn parse_packet(
     // }
 
     match packet_id {
-        0 => {
+        // Keep Alive
+        0x00 => {
             let packet = vec![0];
             stream.write_all(&packet).await.unwrap();
             stream.flush().await.unwrap();
         }
-        1 => {
+        // Login Request
+        0x01 => {
             let protocol_version = get_i32(&mut buf)?;
             // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
@@ -449,7 +451,8 @@ async fn parse_packet(
             stream.flush().await.unwrap();
             println!("sent pos");
         }
-        2 => {
+        // Handshake
+        0x02 => {
             // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
             let ch = ClientHandshake { username };
@@ -457,7 +460,10 @@ async fn parse_packet(
             stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
-
+        0x03 => {
+            let message = get_string(&mut buf)?;
+            println!("{message}")
+        }
         0x0A => {
             let on_ground = get_u8(&mut buf)? != 0;
             println!("on_ground: {on_ground}");
@@ -489,6 +495,12 @@ async fn parse_packet(
             let on_ground = get_u8(&mut buf)? != 0;
             println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
         }
+        0x12 => {
+            let pid = get_i32(&mut buf)?;
+            let arm_swinging = get_u8(&mut buf)? > 0;
+            println!("{pid} {arm_swinging}")
+        }
+
         _ => return Err(Error::Incomplete),
     }
     Ok(buf.position() as usize)
