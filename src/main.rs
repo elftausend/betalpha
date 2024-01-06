@@ -34,47 +34,6 @@ fn test_base_conv() {
 
 extern crate libz_sys;
 
-use libz_sys::{deflate, deflateEnd, deflateInit_, z_stream, Z_OK, Z_STREAM_END};
-
-fn test_libz() {
-    // libz_sys::compress(dest, destLen, source, sourceLen)
-    // Original data
-    let original_data = b"Hello, world!";
-    /*
-    // Initialize the z_stream structure
-    let mut stream = z_stream {
-        next_in: original_data.as_ptr() as *mut _,
-        avail_in: original_data.len() as u32,
-        ..Default::default()
-    };
-
-    // Initialize the deflate stream
-    let mut ret = unsafe { deflateInit_(&mut stream, libz_sys::Z_DEFAULT_COMPRESSION) };
-    assert_eq!(ret, Z_OK);
-
-    // Buffer to hold compressed data
-    let mut compressed_data = vec![0u8; original_data.len() * 2];
-
-    // Set the output buffer
-    stream.next_out = compressed_data.as_mut_ptr() as *mut _;
-    stream.avail_out = compressed_data.len() as u32;
-
-    // Perform the compression
-    ret = unsafe { deflate(&mut stream, libz_sys::Z_FINISH) };
-    assert_eq!(ret, Z_STREAM_END);
-
-    // Clean up the deflate stream
-    ret = unsafe { deflateEnd(&mut stream) };
-    assert_eq!(ret, Z_OK);
-
-    // Resize the compressed_data vector to the actual size
-    compressed_data.resize((stream.next_out as usize - compressed_data.as_ptr() as usize) / std::mem::size_of::<u8>(), 0);
-
-    println!("Compressed data: {:?}", compressed_data);*/
-}
-
-
-
 pub struct Chunk {
     chunk_x: i32,
     chunk_z: i32,
@@ -83,6 +42,21 @@ pub struct Chunk {
     sky_light: Vec<u8>,
     block_light: Vec<u8>,
     height_map: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct Player {
+    protocol_version: i32,
+    logged_in: bool,
+    should_disconnect: bool,
+    username: String,
+    x: f64,
+    y: f64,
+    z: f64,
+    stance: f64,
+    on_ground: bool,
+    yaw: f32,
+    pitch: f32,
 }
 
 #[tokio::main]
@@ -282,12 +256,11 @@ async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
     chunks: &[Chunk],
-    logged_in: &mut bool,
+    player: &mut Player,
 ) -> Result<usize, Error> {
     let mut buf = Cursor::new(&buf[..]);
 
     let packet_id = get_u8(&mut buf)?;
-    println!("packet_id: {packet_id}");
 
     // println!("buf: {buf:?}");
 
@@ -335,7 +308,10 @@ async fn parse_packet(
             println!("protocol_version {protocol_version}");
             println!("username {username}");
 
-            *logged_in = true;
+            player.protocol_version = protocol_version;
+            player.username = username;
+
+            player.logged_in = true;
             for chunk in chunks.iter() {
                 let mut pre_chunk = vec![0x32];
                 pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
@@ -465,43 +441,46 @@ async fn parse_packet(
             println!("{message}")
         }
         0x0A => {
-            let on_ground = get_u8(&mut buf)? != 0;
-            println!("on_ground: {on_ground}");
+            player.on_ground = get_u8(&mut buf)? != 0;
         }
 
         0x0B => {
-            let x = get_f64(&mut buf)?;
-            let y = get_f64(&mut buf)?;
-            let stance = get_f64(&mut buf)?;
-            let z = get_f64(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
-            println!("{x} {y} {stance} {z} {on_ground}");
+            player.x = get_f64(&mut buf)?;
+            player.y = get_f64(&mut buf)?;
+            player.stance = get_f64(&mut buf)?;
+            player.z = get_f64(&mut buf)?;
+            player.on_ground = get_u8(&mut buf)? != 0;
         }
 
         0x0C => {
-            let yaw = get_f32(&mut buf)?;
-            let pitch = get_f32(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
-            println!("{yaw} {pitch} {on_ground}");
+            player.yaw = get_f32(&mut buf)?;
+            player.pitch = get_f32(&mut buf)?;
+            player.on_ground = get_u8(&mut buf)? != 0;
         }
 
         0x0D => {
-            let x = get_f64(&mut buf)?;
-            let y = get_f64(&mut buf)?;
-            let stance = get_f64(&mut buf)?;
-            let z = get_f64(&mut buf)?;
-            let yaw = get_f32(&mut buf)?;
-            let pitch = get_f32(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
-            println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
+            player.x = get_f64(&mut buf)?;
+            player.y = get_f64(&mut buf)?;
+            player.stance = get_f64(&mut buf)?;
+            player.z = get_f64(&mut buf)?;
+            player.yaw = get_f32(&mut buf)?;
+            player.pitch = get_f32(&mut buf)?;
+            player.on_ground = get_u8(&mut buf)? != 0;
         }
         0x12 => {
             let pid = get_i32(&mut buf)?;
-            let arm_swinging = get_u8(&mut buf)? > 0;
-            println!("{pid} {arm_swinging}")
+            let arm_winging = get_u8(&mut buf)? > 0;
+            println!("{pid} {arm_winging}")
         }
-
-        _ => return Err(Error::Incomplete),
+        0xff => {
+            player.should_disconnect = true;
+            let reason = get_string(&mut buf)?;
+            println!("{reason}")
+        }
+        _ => {
+            println!("packet_id: {packet_id}");
+            return Err(Error::Incomplete)
+        },
     }
     Ok(buf.position() as usize)
 }
@@ -511,6 +490,19 @@ async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
 
     let stream = Arc::new(RwLock::new(stream));
     let keep_alive_stream = stream.clone();
+    let mut player = Player {
+        protocol_version: 0,
+        logged_in: false,
+        should_disconnect: false,
+        username: "".to_string(),
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        stance: 0.0,
+        on_ground: false,
+        yaw: 0.0,
+        pitch: 0.0,
+    };
 
     tokio::task::spawn(async move {
         loop {
@@ -523,16 +515,16 @@ async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
     });
         
 
-    let mut logged_in = false;
     loop {
-        if let Ok(n) = parse_packet(&mut *stream.write().await, &buf, chunks, &mut logged_in).await {
+        if let Ok(n) = parse_packet(&mut *stream.write().await, &buf, chunks, &mut player).await {
             buf.advance(n);
         }
-        
 
         if stream.write().await.read_buf(&mut buf).await.unwrap() == 0 {
             println!("break");
             break;
         }
+
+        println!("{player:?}")
     }
 }
