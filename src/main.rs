@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read, Write};
+use std::{io::{Cursor, Read, Write}, sync::Arc};
 
 use bytes::{Buf, BytesMut};
 
@@ -7,7 +7,7 @@ use nbt::{Blob, Value};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream}, sync::RwLock,
 };
 
 fn base36_to_base10(input: i8) -> i32 {
@@ -188,7 +188,7 @@ async fn main() {
     }
 }
 
-const SIZE: usize = 100;
+const SIZE: usize = 1024 * 8;
 
 #[derive(Debug)]
 pub struct ClientHandshake {
@@ -216,7 +216,7 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
 }
 
 fn get_u16(src: &mut Cursor<&[u8]>) -> Result<u16, Error> {
-    if !src.has_remaining() {
+    if src.remaining() < 4 {
         return Err(Error::Incomplete);
     }
     Ok(src.get_u16())
@@ -230,32 +230,39 @@ fn get_i8(src: &mut Cursor<&[u8]>) -> Result<i8, Error> {
 }
 
 fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, Error> {
-    if !src.has_remaining() {
+    if src.remaining() < 4 {
         return Err(Error::Incomplete);
     }
     Ok(src.get_i32())
 }
 
 fn get_f32(src: &mut Cursor<&[u8]>) -> Result<f32, Error> {
-    if !src.has_remaining() {
+    if src.remaining() < 4 {
         return Err(Error::Incomplete);
     }
     Ok(src.get_f32())
 }
 
 fn get_f64(src: &mut Cursor<&[u8]>) -> Result<f64, Error> {
-    if !src.has_remaining() {
+    if src.remaining() < 8 {
         return Err(Error::Incomplete);
     }
     Ok(src.get_f64())
 }
 
-fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, Error> {
-    if !src.has_remaining() {
+fn get_u64(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
+    if src.remaining() < 8 {
         return Err(Error::Incomplete);
     }
+    Ok(src.get_u64())
+}
+
+fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, Error> {
 
     let len = get_u16(src)?;
+    if src.remaining() < len as usize {
+        return Err(Error::Incomplete);
+    }
     let string = String::from_utf8_lossy(&src.chunk()[..len as usize]).to_string();
     skip(src, len as usize)?;
     Ok(string)
@@ -285,9 +292,9 @@ async fn parse_packet(
     println!("buf: {buf:?}");
 
     // remove later
-    if *logged_in {
-        return Ok(buf.remaining() as usize);
-    }
+    // if *logged_in {
+    //     return Ok(buf.remaining() as usize);
+    // }
 
     match packet_id {
         0 => {
@@ -301,6 +308,8 @@ async fn parse_packet(
             let username = get_string(&mut buf)?;
             // skip(&mut buf, 1)?;
             let _password = get_string(&mut buf)?;
+            let _map_seed = get_u64(&mut buf)?;
+            let _dimension = get_i8(&mut buf)?;
 
             let entity_id = 1337i32;
             // let seed = 1111423422i64;
@@ -449,6 +458,11 @@ async fn parse_packet(
             println!("ch: {ch:?}");
         }
 
+        0x0A => {
+            let on_ground = get_u8(&mut buf)? != 0;
+            println!("on_ground: {on_ground}");
+        }
+
         0x0B => {
             let x = get_f64(&mut buf)?;
             let y = get_f64(&mut buf)?;
@@ -475,21 +489,36 @@ async fn parse_packet(
             let on_ground = get_u8(&mut buf)? != 0;
             println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
         }
-        _ => return Ok(0),
+        _ => return Err(Error::Incomplete),
     }
-
     Ok(buf.position() as usize)
 }
 
 async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
     let mut buf = BytesMut::with_capacity(SIZE);
+
+    let stream = Arc::new(RwLock::new(stream));
+    let keep_alive_stream = stream.clone();
+
+    tokio::task::spawn(async move {
+        loop {
+            let packet = vec![0];
+            keep_alive_stream.write().await.write_all(&packet).await.unwrap();
+            keep_alive_stream.write().await.flush().await.unwrap();
+        
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+    });
+        
+
     let mut logged_in = false;
     loop {
-        if let Ok(n) = parse_packet(&mut stream, &buf, chunks, &mut logged_in).await {
+        if let Ok(n) = parse_packet(&mut *stream.write().await, &buf, chunks, &mut logged_in).await {
             buf.advance(n);
-            buf.clear(); // some fields in packets are ignored
         }
-        if stream.read_buf(&mut buf).await.unwrap() == 0 {
+        
+
+        if stream.write().await.read_buf(&mut buf).await.unwrap() == 0 {
             println!("break");
             break;
         }
