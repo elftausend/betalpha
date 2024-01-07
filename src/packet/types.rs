@@ -192,10 +192,10 @@ pub enum ToClientPacket {
 
 pub enum ToServerPacket {
     KeepAlive,
-    LoginResponse {
-        entity_id: u32,
-        _unused1: String,
-        _unused2: String,
+    LoginRequest {
+        protocol_version: u32,
+        username: String,
+        password: String,
         map_seed: u64,
         dimension: u8,
     },

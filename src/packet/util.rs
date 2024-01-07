@@ -30,6 +30,13 @@ pub fn get_i8(src: &mut Cursor<&[u8]>) -> Result<i8, ParsingError> {
     Ok(src.get_i8())
 }
 
+pub fn get_u32(src: &mut Cursor<&[u8]>) -> Result<u32, ParsingError> {
+    if src.remaining() < 4 {
+        return Err(ParsingError::NotEnoughBytes);
+    }
+    Ok(src.get_u32())
+}
+
 pub fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, ParsingError> {
     if src.remaining() < 4 {
         return Err(ParsingError::NotEnoughBytes);
@@ -66,6 +73,10 @@ pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, ParsingError> {
     let string = String::from_utf8(src.chunk()[..len as usize].to_vec()).map_err(|_e| ParsingError::InvalidString)?;
     skip(src, len as usize)?;
     Ok(string)
+}
+
+pub fn get_inventory_payload(src: &mut Cursor<&[u8]>) -> Result<Vec<u8>, ParsingError> {
+    todo!()
 }
 
 pub fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), ParsingError> {
