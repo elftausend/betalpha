@@ -1,10 +1,10 @@
+mod parse;
 mod types;
 pub mod util;
-mod parse;
 
+use bytes::Buf;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use bytes::Buf;
 
 pub enum PacketError {
     NotEnoughBytes,

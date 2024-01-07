@@ -1,6 +1,6 @@
-use std::io::Cursor;
-use bytes::Buf;
 use crate::packet::PacketError;
+use bytes::Buf;
+use std::io::Cursor;
 
 #[derive(Default)]
 pub struct PacketSerializer {
@@ -9,7 +9,8 @@ pub struct PacketSerializer {
 
 impl PacketSerializer {
     pub fn serialize_bool(&mut self, v: bool) -> Result<(), PacketError> {
-        self.output.append(&mut [if v {0x01} else {0x00}].to_vec());
+        self.output
+            .append(&mut [if v { 0x01 } else { 0x00 }].to_vec());
         Ok(())
     }
 
@@ -64,7 +65,8 @@ impl PacketSerializer {
     }
 
     pub fn serialize_string(&mut self, v: String) -> Result<(), PacketError> {
-        self.output.append(&mut (vec![(v.len() as u16).to_be_bytes().as_slice(), v.as_bytes()].concat()));
+        self.output
+            .append(&mut (vec![(v.len() as u16).to_be_bytes().as_slice(), v.as_bytes()].concat()));
         Ok(())
     }
 
@@ -168,13 +170,24 @@ impl PacketDeserializer {
 
     pub fn deserialize_string(v: &mut Cursor<&[u8]>) -> Result<(usize, String), PacketError> {
         let len = Self::deserialize_u16(v)?.1 as usize;
-        let string = String::from_utf8(v.chunk()[..len].to_vec()).map_err(|_e| PacketError::InvalidString)?;
+
+        if v.remaining() < len as usize {
+            return Err(PacketError::NotEnoughBytes);
+        }
+
+        let string = String::from_utf8(v.chunk()[..len].to_vec())
+            .map_err(|_e| PacketError::InvalidString)?;
         v.advance(len);
         Ok((len, string))
     }
 
-    pub fn deserialize_payload(mut v: &mut Cursor<&[u8]>) -> Result<(usize, Vec<u8>), PacketError> {
+    pub fn deserialize_payload(v: &mut Cursor<&[u8]>) -> Result<(usize, Vec<u8>), PacketError> {
         let len = Self::deserialize_u16(v)?.1 as usize;
+
+        if v.remaining() < len as usize {
+            return Err(PacketError::NotEnoughBytes);
+        }
+
         let vec = v.get_ref()[..len].to_vec();
         v.advance(len);
         Ok((len, vec))

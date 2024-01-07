@@ -1,4 +1,13 @@
-use std::{sync::{atomic::{AtomicBool, AtomicI32, Ordering}, Arc}, io::Cursor, pin::Pin, future::Future, collections::HashSet};
+use std::{
+    collections::HashSet,
+    future::Future,
+    io::Cursor,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, AtomicI32, Ordering},
+        Arc,
+    },
+};
 
 use bytes::{Buf, BytesMut};
 
@@ -16,15 +25,13 @@ use tokio::{
 
 mod packet;
 
-
-use crate::packet::PacketError;
 use crate::packet::util::*;
+use crate::packet::PacketError;
 
 // mod byte_man;
 // pub use byte_man::*;
 
 mod entities;
-
 
 fn base36_to_base10(input: i8) -> i32 {
     let mut result = 0;
@@ -213,7 +220,8 @@ async fn main() {
         })
         .collect::<Vec<_>>();
     let chunks = &*Box::leak(chunks.into_boxed_slice());
-    let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
+    let (pos_and_look_tx, mut pos_and_look_rx) =
+        mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
 
     let (pos_and_look_update_tx, mut pos_and_look_update_rx) = broadcast::channel(256);
     let (tx_destroy_self_entity, mut rx_entity_destroy) = mpsc::channel::<i32>(100);
@@ -238,20 +246,30 @@ async fn main() {
                 if prev_pos_and_look.is_none() {
                     for (eid, pos_and_look) in &entity_positions {
                         pos_and_look_update_tx_inner
-                            .send((*eid, entities::Type::Player(entity_username[eid].clone()), *pos_and_look, None))
+                            .send((
+                                *eid,
+                                entities::Type::Player(entity_username[eid].clone()),
+                                *pos_and_look,
+                                None,
+                            ))
                             .unwrap();
                     }
                 }
 
                 pos_and_look_update_tx_inner
-                    .send((eid, entities::Type::Player(entity_username[&eid].clone()), pos_and_look, prev_pos_and_look))
+                    .send((
+                        eid,
+                        entities::Type::Player(entity_username[&eid].clone()),
+                        pos_and_look,
+                        prev_pos_and_look,
+                    ))
                     .unwrap();
             }
 
             if let Ok(eid) = rx_entity_destroy.try_recv() {
                 entity_positions.remove(&eid);
                 entity_username.remove(&eid);
-                
+
                 tx_destroy_entities_inner.send(eid).unwrap();
             }
             tokio::time::sleep(std::time::Duration::from_secs_f64(0.0001)).await;
@@ -263,7 +281,7 @@ async fn main() {
             tx_player_pos_and_look: pos_and_look_tx.clone(),
             rx_entity_movement: pos_and_look_update_tx.clone().subscribe(),
             tx_destroy_self_entity: tx_destroy_self_entity.clone(),
-            rx_destroy_entities: tx_destroy_entities.clone().subscribe()
+            rx_destroy_entities: tx_destroy_entities.clone().subscribe(),
         };
 
         let stream = listener.accept().await.unwrap();
@@ -303,7 +321,10 @@ pub enum Error {
     Incomplete,
 }
 
-pub async fn keep_alive(_buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), PacketError> {
+pub async fn keep_alive(
+    _buf: &mut Cursor<&[u8]>,
+    stream: &mut TcpStream,
+) -> Result<(), PacketError> {
     let packet = vec![0];
     stream.write_all(&packet).await.unwrap();
     stream.flush().await.unwrap();
@@ -463,7 +484,11 @@ async fn parse_packet(
                 state.position_and_look.z = z;
                 state.position_and_look.yaw = yaw;
                 state.position_and_look.pitch = pitch;
-                outer_state = (state.entity_id, state.position_and_look, Some(state.username.clone()));
+                outer_state = (
+                    state.entity_id,
+                    state.position_and_look,
+                    Some(state.username.clone()),
+                );
             }
             entity_tx
                 .send((outer_state.0, outer_state.1, outer_state.2))
@@ -586,8 +611,8 @@ async fn parse_packet(
         }
         _ => {
             println!("packet_id: {packet_id}");
-            return Err(PacketError::NotEnoughBytes)
-        },
+            return Err(PacketError::NotEnoughBytes);
+        }
     }
     Ok(buf.position() as usize)
 }
@@ -615,7 +640,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         tx_player_pos_and_look,
         mut rx_entity_movement,
         tx_destroy_self_entity,
-        mut rx_destroy_entities
+        mut rx_destroy_entities,
     } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
@@ -729,7 +754,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
                 println!("des: {eid}");
                 let mut destroy_entity = vec![0x1D];
                 destroy_entity.extend_from_slice(&eid.to_be_bytes());
-                
+
                 let mut destroy_entity_stream = entity_destroy_stream.write().await;
                 destroy_entity_stream
                     .write_all(&destroy_entity)
@@ -777,5 +802,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         // println!("{player:?}")
     }
 
-    tx_destroy_self_entity.send(state.read().await.entity_id).await.unwrap();
+    tx_destroy_self_entity
+        .send(state.read().await.entity_id)
+        .await
+        .unwrap();
 }

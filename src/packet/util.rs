@@ -1,6 +1,6 @@
-use std::io::Cursor;
-use bytes::Buf;
 use crate::packet::PacketError;
+use bytes::Buf;
+use std::io::Cursor;
 
 pub fn peek_u8(src: &mut Cursor<&[u8]>) -> Result<u8, PacketError> {
     if !src.has_remaining() {
@@ -70,7 +70,8 @@ pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, PacketError> {
     if src.remaining() < len as usize {
         return Err(PacketError::NotEnoughBytes);
     }
-    let string = String::from_utf8(src.chunk()[..len as usize].to_vec()).map_err(|_e| PacketError::InvalidString)?;
+    let string = String::from_utf8(src.chunk()[..len as usize].to_vec())
+        .map_err(|_e| PacketError::InvalidString)?;
     skip(src, len as usize)?;
     Ok(string)
 }
@@ -88,5 +89,9 @@ pub fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), PacketError> {
 }
 
 pub fn string_to_bytes(string: String) -> Vec<u8> {
-    vec![(string.len() as u16).to_be_bytes().as_slice(), string.into_bytes().as_slice()].concat()
+    vec![
+        (string.len() as u16).to_be_bytes().as_slice(),
+        string.into_bytes().as_slice(),
+    ]
+    .concat()
 }

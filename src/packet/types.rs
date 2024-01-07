@@ -1,10 +1,10 @@
 mod to_client_packets {
-    use std::io::Cursor;
-    use bytes::Buf;
-    use betalpha_derive::{Deserialize, Serialize};
-    use crate::packet::parse::{Deserialize, PacketDeserializer, Serialize};
-    use super::super::PacketError;
     use super::super::parse::PacketSerializer;
+    use super::super::PacketError;
+    use crate::packet::parse::{Deserialize, PacketDeserializer, Serialize};
+    use betalpha_derive::{Deserialize, Serialize};
+    use bytes::Buf;
+    use std::io::Cursor;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct KeepAlive;
@@ -236,7 +236,13 @@ mod to_client_packets {
             serializer.serialize_i32(self.chunk_x)?;
             serializer.serialize_i32(self.chunk_y)?;
             serializer.serialize_u16(self.array_size)?;
-            serializer.serialize_payload(self.coordinate_array.iter().map(|e| e.to_be_bytes()).collect::<Vec<[u8; 2]>>().concat())?;
+            serializer.serialize_payload(
+                self.coordinate_array
+                    .iter()
+                    .map(|e| e.to_be_bytes())
+                    .collect::<Vec<[u8; 2]>>()
+                    .concat(),
+            )?;
             serializer.serialize_payload(self.type_array.clone())?;
             serializer.serialize_payload(self.metadata_array.clone())?;
             Ok(serializer.output)
@@ -249,10 +255,14 @@ mod to_client_packets {
             let (_n, chunk_y): (usize, i32) = PacketDeserializer::deserialize_i32(cursor)?;
             let (_n, array_size): (usize, u16) = PacketDeserializer::deserialize_u16(cursor)?;
             let remaining = cursor.chunk();
-            let coordinate_array = remaining[0..array_size as usize * 2].to_vec().chunks(2)
-                .map(|e| i16::from_be_bytes([e[0], e[1]])).collect::<Vec<i16>>();
+            let coordinate_array = remaining[0..array_size as usize * 2]
+                .to_vec()
+                .chunks(2)
+                .map(|e| i16::from_be_bytes([e[0], e[1]]))
+                .collect::<Vec<i16>>();
             let type_array = remaining[array_size as usize * 2..array_size as usize * 3].to_vec();
-            let metadata_array = remaining[array_size as usize * 3..array_size as usize * 4].to_vec();
+            let metadata_array =
+                remaining[array_size as usize * 3..array_size as usize * 4].to_vec();
             Ok(Self {
                 chunk_x,
                 chunk_y,
@@ -299,9 +309,9 @@ mod to_client_packets {
 }
 
 mod to_server_packets {
-    use betalpha_derive::{Deserialize, Serialize};
-    use super::super::PacketError;
     use super::super::parse::PacketSerializer;
+    use super::super::PacketError;
+    use betalpha_derive::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct KeepAlivePacket;
