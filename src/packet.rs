@@ -13,19 +13,27 @@ pub enum PacketError {
     InvalidString,
     InvalidPacketID(u8),
     InvalidOptional,
+    IOError(std::io::Error),
 }
 
 impl Error for PacketError {}
 
 impl Debug for PacketError {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }
 
 impl Display for PacketError {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            PacketError::NotEnoughBytes => "Packet is incomplete".to_string(),
+            PacketError::InvalidString => "Provided string is invalid".to_string(),
+            PacketError::InvalidPacketID(id) => format!("Packet ID {id} is an invalid packet"),
+            PacketError::InvalidOptional => "Invalid optional".to_string(),
+            PacketError::IOError(e) => format!("IO error occured: {e}"),
+        };
+        write!(f, "{text}")
     }
 }
 

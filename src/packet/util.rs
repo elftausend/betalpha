@@ -1,6 +1,23 @@
 use crate::packet::PacketError;
 use bytes::Buf;
 use std::io::Cursor;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
+
+use super::Serialize;
+
+pub trait SendPacket {
+    async fn send(&self, stream: &mut TcpStream) -> Result<(), PacketError>;
+}
+
+impl<P: Serialize> SendPacket for P {
+    #[inline]
+    async fn send(&self, stream: &mut TcpStream) -> Result<(), PacketError> {
+        stream
+            .write_all(&self.serialize()?)
+            .await
+            .map_err(|e| PacketError::IOError(e))
+    }
+}
 
 pub fn peek_u8(src: &mut Cursor<&[u8]>) -> Result<u8, PacketError> {
     if !src.has_remaining() {

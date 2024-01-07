@@ -25,7 +25,8 @@ fn implement_serialize_trait(attr: &syn::Expr, ast: &DeriveInput) -> TokenStream
         let mut body = proc_macro2::TokenStream::new();
         quote!(
             serializer.serialize_u8(#attr)?;
-        ).to_tokens(&mut body);
+        )
+        .to_tokens(&mut body);
         for (ident, ty) in fields {
             let line = match ty.to_string().as_str() {
                 "bool" => quote! {serializer.serialize_bool(self.#ident)?;},
