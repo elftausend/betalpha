@@ -11,6 +11,8 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream}, sync::RwLock,
 };
+use crate::packet::PacketError;
+use crate::packet::util::*;
 
 fn base36_to_base10(input: i8) -> i32 {
     let mut result = 0;
@@ -171,18 +173,13 @@ pub struct ClientHandshake {
     username: String,
 }
 
-
-pub enum Error {
-    Incomplete,
-}
-
 // add checking with peak (faster)
 async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
     chunks: &[Chunk],
     player: &mut Player,
-) -> Result<usize, Error> {
+) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
 
     let packet_id = get_u8(&mut buf)?;
@@ -404,7 +401,7 @@ async fn parse_packet(
         }
         _ => {
             println!("packet_id: {packet_id}");
-            return Err(Error::Incomplete)
+            return Err(PacketError::NotEnoughBytes)
         },
     }
     Ok(buf.position() as usize)
