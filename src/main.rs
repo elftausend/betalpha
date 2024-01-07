@@ -60,7 +60,7 @@ use crate::entities::spawned_named_entity;
 fn test_libz() {
     // libz_sys::compress(dest, destLen, source, sourceLen)
     // Original data
-    let original_data = b"Hello, world!";
+    let _original_data = b"Hello, world!";
     /*
     // Initialize the z_stream structure
     let mut stream = z_stream {
@@ -112,7 +112,7 @@ type PacketHandler = Box<
 >;
 
 #[inline]
-pub async fn incomplete(buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), Error> {
+pub async fn incomplete(_buf: &mut Cursor<&[u8]>, _stream: &mut TcpStream) -> Result<(), Error> {
     Err(Error::Incomplete)
 }
 
@@ -223,7 +223,7 @@ async fn main() {
     let (pos_and_look_tx, mut pos_and_look_rx) =
         mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
 
-    let (pos_and_look_update_tx, mut pos_and_look_update_rx) = broadcast::channel(256);
+    let (pos_and_look_update_tx, _pos_and_look_update_rx) = broadcast::channel(256);
     let (tx_destroy_self_entity, mut rx_entity_destroy) = mpsc::channel::<i32>(100);
     let (tx_destroy_entities, _) = broadcast::channel(256);
 
@@ -528,16 +528,16 @@ async fn parse_packet(
             println!("{message}")
         }
         0x0A => {
-            let on_ground = get_u8(&mut buf)? != 0;
+            let _on_ground = get_u8(&mut buf)? != 0;
             // println!("on_ground: {on_ground}");
         }
 
         0x0B => {
             let x = get_f64(&mut buf)?;
             let y = get_f64(&mut buf)?;
-            let stance = get_f64(&mut buf)?;
+            let _stance = get_f64(&mut buf)?;
             let z = get_f64(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
+            let _on_ground = get_u8(&mut buf)? != 0;
 
             let outer_state;
             {
@@ -558,7 +558,7 @@ async fn parse_packet(
         0x0C => {
             let yaw = get_f32(&mut buf)?;
             let pitch = get_f32(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
+            let _on_ground = get_u8(&mut buf)? != 0;
 
             let outer_state;
             {
@@ -577,11 +577,11 @@ async fn parse_packet(
         0x0D => {
             let x = get_f64(&mut buf)?;
             let y = get_f64(&mut buf)?;
-            let stance = get_f64(&mut buf)?;
+            let _stance = get_f64(&mut buf)?;
             let z = get_f64(&mut buf)?;
             let yaw = get_f32(&mut buf)?;
             let pitch = get_f32(&mut buf)?;
-            let on_ground = get_u8(&mut buf)? != 0;
+            let _on_ground = get_u8(&mut buf)? != 0;
             let outer_state;
             {
                 let mut state = state.write().await;

@@ -76,7 +76,7 @@ pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, PacketError> {
     Ok(string)
 }
 
-pub fn get_inventory_payload(src: &mut Cursor<&[u8]>) -> Result<Vec<u8>, PacketError> {
+pub fn get_inventory_payload(_src: &mut Cursor<&[u8]>) -> Result<Vec<u8>, PacketError> {
     todo!()
 }
 
@@ -89,9 +89,7 @@ pub fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), PacketError> {
 }
 
 pub fn string_to_bytes(string: String) -> Vec<u8> {
-    vec![
-        (string.len() as u16).to_be_bytes().as_slice(),
-        string.into_bytes().as_slice(),
-    ]
+    [(string.len() as u16).to_be_bytes().as_slice(),
+        string.into_bytes().as_slice()]
     .concat()
 }

@@ -66,7 +66,7 @@ impl PacketSerializer {
 
     pub fn serialize_string(&mut self, v: String) -> Result<(), PacketError> {
         self.output
-            .append(&mut (vec![(v.len() as u16).to_be_bytes().as_slice(), v.as_bytes()].concat()));
+            .append(&mut ([(v.len() as u16).to_be_bytes().as_slice(), v.as_bytes()].concat()));
         Ok(())
     }
 
@@ -171,7 +171,7 @@ impl PacketDeserializer {
     pub fn deserialize_string(v: &mut Cursor<&[u8]>) -> Result<(usize, String), PacketError> {
         let len = Self::deserialize_u16(v)?.1 as usize;
 
-        if v.remaining() < len as usize {
+        if v.remaining() < len {
             return Err(PacketError::NotEnoughBytes);
         }
 
@@ -184,7 +184,7 @@ impl PacketDeserializer {
     pub fn deserialize_payload(v: &mut Cursor<&[u8]>) -> Result<(usize, Vec<u8>), PacketError> {
         let len = Self::deserialize_u16(v)?.1 as usize;
 
-        if v.remaining() < len as usize {
+        if v.remaining() < len {
             return Err(PacketError::NotEnoughBytes);
         }
 

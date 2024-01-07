@@ -2,7 +2,7 @@ mod parse;
 mod types;
 pub mod util;
 
-use bytes::Buf;
+
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 
@@ -16,13 +16,13 @@ pub enum PacketError {
 impl Error for PacketError {}
 
 impl Debug for PacketError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }
 
 impl Display for PacketError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }
