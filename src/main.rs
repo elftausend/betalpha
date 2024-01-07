@@ -16,7 +16,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{
-        broadcast::{self},
+        broadcast::{self, error::TryRecvError},
         mpsc::{self, Sender},
         RwLock,
     },
@@ -219,15 +219,19 @@ async fn main() {
     let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
 
     let (pos_and_look_update_tx, mut pos_and_look_update_rx) = broadcast::channel(256);
+    let (tx_destroy_self_entity, mut rx_entity_destroy) = mpsc::channel::<i32>(100);
+    let (tx_destroy_entities, _) = broadcast::channel(256);
 
     // several maps - avoid cloning of username (remove username from state -> username lookup ?)
     let mut entity_positions = std::collections::HashMap::new();
     let mut entity_username = std::collections::HashMap::new();
 
     let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
+    let tx_destroy_entities_inner = tx_destroy_entities.clone();
     tokio::spawn(async move {
         loop {
-            if let Some((eid, pos_and_look, username)) = pos_and_look_rx.recv().await {
+            // receive position updates, log in (username)
+            if let Ok((eid, pos_and_look, username)) = pos_and_look_rx.try_recv() {
                 let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
                 if let Some(username) = username {
                     entity_username.insert(eid, username);
@@ -246,6 +250,14 @@ async fn main() {
                     .send((eid, entities::Type::Player(entity_username[&eid].clone()), pos_and_look, prev_pos_and_look))
                     .unwrap();
             }
+
+            if let Ok(eid) = rx_entity_destroy.try_recv() {
+                entity_positions.remove(&eid);
+                entity_username.remove(&eid);
+                
+                tx_destroy_entities_inner.send(eid).unwrap();
+            }
+            tokio::time::sleep(std::time::Duration::from_secs_f64(0.0001)).await;
         }
     });
 
@@ -253,13 +265,19 @@ async fn main() {
         let mut channels = Channels {
             tx_player_pos_and_look: pos_and_look_tx.clone(),
             rx_entity_movement: pos_and_look_update_tx.clone().subscribe(),
+            tx_destroy_self_entity: tx_destroy_self_entity.clone(),
+            rx_destroy_entities: tx_destroy_entities.clone().subscribe()
         };
 
         let stream = listener.accept().await.unwrap();
         tokio::spawn(async move {
             let rx_entity_movement = &mut channels.rx_entity_movement;
-            // used to clear the prevoius buffered moves
-            while let Ok(_) = rx_entity_movement.try_recv() {}
+            let rx_destroy_entities = &mut channels.rx_destroy_entities;
+
+            // used to clear the prevoius buffered moves ..
+            while rx_entity_movement.try_recv().err() != Some(TryRecvError::Empty) {}
+            while rx_destroy_entities.try_recv().err() != Some(TryRecvError::Empty) {}
+
             handle_client(stream.0, chunks, channels).await;
         });
     }
@@ -273,6 +291,8 @@ pub struct Channels {
         PositionAndLook,
         Option<PositionAndLook>,
     )>,
+    tx_destroy_self_entity: mpsc::Sender<i32>,
+    rx_destroy_entities: broadcast::Receiver<i32>,
 }
 
 const SIZE: usize = 1024 * 8;
@@ -597,11 +617,14 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
     let Channels {
         tx_player_pos_and_look,
         mut rx_entity_movement,
+        tx_destroy_self_entity,
+        mut rx_destroy_entities
     } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
     let keep_alive_stream = stream.clone();
     let pos_update_stream = stream.clone();
+    let entity_destroy_stream = stream.clone();
 
     let state = Arc::new(RwLock::new(State {
         entity_id: 0,
@@ -620,11 +643,12 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
 
     let logged_in_inner = logged_in.clone();
     let state_pos_update = state.clone();
+
+    // spawn or update entities
     tokio::task::spawn(async move {
         let mut seen_before = HashSet::new();
         loop {
             // single core servers
-            // tokio::time::sleep(std::time::Duration::from_secs_f64(0.001)).await;
             if !logged_in_inner.load(Ordering::Relaxed) {
                 continue;
             }
@@ -701,6 +725,24 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         }
     });
 
+    // destroy entities
+    tokio::task::spawn(async move {
+        loop {
+            if let Ok(eid) = rx_destroy_entities.recv().await {
+                println!("des: {eid}");
+                let mut destroy_entity = vec![0x1D];
+                destroy_entity.extend_from_slice(&eid.to_be_bytes());
+                
+                let mut destroy_entity_stream = entity_destroy_stream.write().await;
+                destroy_entity_stream
+                    .write_all(&destroy_entity)
+                    .await
+                    .unwrap();
+                destroy_entity_stream.flush().await.unwrap();
+            }
+        }
+    });
+
     tokio::task::spawn(async move {
         loop {
             let packet = vec![0];
@@ -737,4 +779,6 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
 
         // println!("{player:?}")
     }
+
+    tx_destroy_self_entity.send(state.read().await.entity_id).await.unwrap();
 }
