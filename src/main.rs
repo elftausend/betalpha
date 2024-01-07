@@ -10,13 +10,13 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 
-use nbt::{Blob, Map, Value};
+use nbt::{Blob, Value};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{
-        broadcast::{self, channel},
+        broadcast::{self},
         mpsc::{self, Sender},
         RwLock,
     },
@@ -50,10 +50,6 @@ fn test_base_conv() {
     println!("base: {}", base36_to_base10(-127));
     println!("{}", (12 << 4));
 }
-
-extern crate libz_sys;
-
-use libz_sys::{deflate, deflateEnd, deflateInit_, z_stream, Z_OK, Z_STREAM_END};
 
 use crate::entities::spawned_named_entity;
 
@@ -219,20 +215,29 @@ async fn main() {
             })
         })
         .collect::<Vec<_>>();
-
     let chunks = &*Box::leak(chunks.into_boxed_slice());
     let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook)>(256);
 
-    let (pos_and_look_update_tx, mut pos_and_look_update_rx) =
-        broadcast::channel(256);
+    let (pos_and_look_update_tx, mut pos_and_look_update_rx) = broadcast::channel(256);
 
     let mut entity_positions = std::collections::HashMap::new();
+    // let mut entity
 
     let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
     tokio::spawn(async move {
         loop {
             if let Some((eid, pos_and_look)) = pos_and_look_rx.recv().await {
                 let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
+
+                // if a player logs in, not moving entities should be sent
+                if prev_pos_and_look.is_none() {
+                    for (eid, pos_and_look) in &entity_positions {
+                        pos_and_look_update_tx_inner
+                            .send((*eid, entities::Type::Player, *pos_and_look, None))
+                            .unwrap();
+                    }
+                }
+
                 pos_and_look_update_tx_inner
                     .send((eid, entities::Type::Player, pos_and_look, prev_pos_and_look))
                     .unwrap();
@@ -241,13 +246,16 @@ async fn main() {
     });
 
     loop {
-        let channels = Channels {
+        let mut channels = Channels {
             tx_player_pos_and_look: pos_and_look_tx.clone(),
             rx_entity_movement: pos_and_look_update_tx.clone().subscribe(),
         };
 
         let stream = listener.accept().await.unwrap();
         tokio::spawn(async move {
+            let rx_entity_movement = &mut channels.rx_entity_movement;
+            // used to clear the prevoius buffered moves
+            while let Ok(_) = rx_entity_movement.try_recv() {}
             handle_client(stream.0, chunks, channels).await;
         });
     }
@@ -255,7 +263,12 @@ async fn main() {
 
 pub struct Channels {
     tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook)>,
-    rx_entity_movement: broadcast::Receiver<(i32, entities::Type, PositionAndLook, Option<PositionAndLook>)>,
+    rx_entity_movement: broadcast::Receiver<(
+        i32,
+        entities::Type,
+        PositionAndLook,
+        Option<PositionAndLook>,
+    )>,
 }
 
 const SIZE: usize = 1024 * 8;
@@ -574,7 +587,6 @@ pub struct PositionAndLook {
     pitch: f32,
 }
 
-
 async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) {
     let mut buf = BytesMut::with_capacity(SIZE);
 
@@ -608,7 +620,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         let mut seen_before = HashSet::new();
         loop {
             // single core servers
-            tokio::time::sleep(std::time::Duration::from_secs_f64(0.001)).await;
+            // tokio::time::sleep(std::time::Duration::from_secs_f64(0.001)).await;
             if !logged_in_inner.load(Ordering::Relaxed) {
                 continue;
             }
@@ -632,9 +644,10 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
                 let mut pos_update_stream = pos_update_stream.write().await;
 
                 match ty {
-                    entities::Type::Player => spawned_named_entity(&mut pos_update_stream, eid, "Stefan", &now).await
+                    entities::Type::Player => {
+                        spawned_named_entity(&mut pos_update_stream, eid, "Stefan", &now).await
+                    }
                 };
-
 
                 let mut entity_spawn = vec![0x1E];
                 entity_spawn.extend_from_slice(&eid.to_be_bytes());

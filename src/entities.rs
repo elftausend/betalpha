@@ -1,10 +1,10 @@
-use tokio::{net::TcpStream, io::AsyncWriteExt};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::PositionAndLook;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Type {
-    Player
+    Player,
 }
 
 pub async fn spawned_named_entity(
