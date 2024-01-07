@@ -340,7 +340,6 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
     .send(stream)
     .await?;
 
-
     // let mut map_chunk = vec![0x33];
     let x = chunk.chunk_x * 16;
     let y = 0i16;
@@ -369,7 +368,7 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
             size_y: 127,
             size_z: 15,
             compressed_size: len as i32,
-            compressed_data: compressed_bytes[..len as usize].to_vec()
+            compressed_data: compressed_bytes[..len as usize].to_vec(),
         }
         .send(stream)
         .await?;
@@ -394,231 +393,237 @@ async fn parse_packet(
 ) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
 
-    let packet_id = get_u8(&mut buf)?;
+    // let packet_id = get_u8(&mut buf)?;
     // println!("packet_id: {packet_id}");
 
     // println!("buf: {buf:?}");
 
-    match packet_id {
-        0 => keep_alive(&mut buf, stream).await?,
-        1 => {
-            let login_request = packet::LoginRequestPacket::nested_deserialize(&mut buf)?;
-            let protocol_version = login_request.protocol_version;
-            let username = login_request.username;
-            // let protocol_version = get_i32(&mut buf)?;
-            // // skip(&mut buf, 1)?;
-            // let username = get_string(&mut buf)?;
-            // // skip(&mut buf, 1)?;
-            // let _password = get_string(&mut buf)?;
-            // let _map_seed = get_u64(&mut buf)?;
-            // let _dimension = get_i8(&mut buf)?;
+    // some packets may accumulate, therefore process all of them (happened especially for 0x0A)
+    while let Ok(packet_id) = get_u8(&mut buf) {
+        match packet_id {
+            0 => keep_alive(&mut buf, stream).await?,
+            1 => {
+                let login_request = packet::LoginRequestPacket::nested_deserialize(&mut buf)?;
+                let protocol_version = login_request.protocol_version;
+                let username = login_request.username;
+                // let protocol_version = get_i32(&mut buf)?;
+                // // skip(&mut buf, 1)?;
+                // let username = get_string(&mut buf)?;
+                // // skip(&mut buf, 1)?;
+                // let _password = get_string(&mut buf)?;
+                // let _map_seed = get_u64(&mut buf)?;
+                // let _dimension = get_i8(&mut buf)?;
 
-            let entity_id = get_id();
-            // let seed = 1111423422i64;
-            let seed: i64 = 9065250152070435348;
-            // let seed: i64 = -4264101711260417039;
-            let dimension = 0i8; // -1 hell
+                let entity_id = get_id();
+                // let seed = 1111423422i64;
+                let seed: i64 = 9065250152070435348;
+                // let seed: i64 = -4264101711260417039;
+                let dimension = 0i8; // -1 hell
 
-            let login_response = packet::LoginResponsePacket {
-                entity_id,
-                _unused1: String::new(),
-                _unused2: String::new(),
-                map_seed: seed,
-                dimension,
-            };
-            login_response.send(stream).await?;
+                let login_response = packet::LoginResponsePacket {
+                    entity_id,
+                    _unused1: String::new(),
+                    _unused2: String::new(),
+                    map_seed: seed,
+                    dimension,
+                };
+                login_response.send(stream).await?;
 
-            // let mut packet = vec![1];
-            // packet.extend_from_slice(&entity_id.to_be_bytes());
+                // let mut packet = vec![1];
+                // packet.extend_from_slice(&entity_id.to_be_bytes());
 
-            // packet.extend_from_slice(&[0, 0, 0, 0]);
-            // #[rustfmt::skip]
-            // // packet.extend_from_slice(&[0, 0,0, 0, 0,0, 0]);
-            // packet.extend_from_slice(&seed.to_be_bytes());
-            // // packet.extend_from_slice(&[0 ]);
-            // packet.extend_from_slice(&dimension.to_be_bytes());
+                // packet.extend_from_slice(&[0, 0, 0, 0]);
+                // #[rustfmt::skip]
+                // // packet.extend_from_slice(&[0, 0,0, 0, 0,0, 0]);
+                // packet.extend_from_slice(&seed.to_be_bytes());
+                // // packet.extend_from_slice(&[0 ]);
+                // packet.extend_from_slice(&dimension.to_be_bytes());
 
-            println!("protocol_version {protocol_version}");
-            println!("username {username}");
-            {
-                let mut state = state.write().await;
-                state.username = username;
-                state.entity_id = entity_id;
-            }
-            logged_in.store(true, Ordering::Relaxed);
+                println!("protocol_version {protocol_version}");
+                println!("username {username}");
+                {
+                    let mut state = state.write().await;
+                    state.username = username;
+                    state.entity_id = entity_id;
+                }
+                logged_in.store(true, Ordering::Relaxed);
 
-            for chunk in chunks.iter() {
-                send_chunk(chunk, stream).await.unwrap();
-            }
-            println!("sent map");
+                for chunk in chunks.iter() {
+                    send_chunk(chunk, stream).await.unwrap();
+                }
+                println!("sent map");
 
-            packet::SpawnPositionPacket {
-                x: -56i32,
-                y: 80i32,
-                z: 70i32,
-            }
-            .send(stream)
-            .await?;
-
-            println!("sent spawn");
-
-            for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
-                packet::PlayerInventoryPacket {
-                    inventory_type: id,
-                    count,
-                    payload: vec![(-1i16).to_be_bytes(); count as usize].concat(),
+                packet::SpawnPositionPacket {
+                    x: -56i32,
+                    y: 80i32,
+                    z: 70i32,
                 }
                 .send(stream)
                 .await?;
+
+                println!("sent spawn");
+
+                for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
+                    packet::PlayerInventoryPacket {
+                        inventory_type: id,
+                        count,
+                        payload: vec![(-1i16).to_be_bytes(); count as usize].concat(),
+                    }
+                    .send(stream)
+                    .await?;
+                }
+
+                println!("sent inv");
+
+                let x = 0.27f64;
+                let y = 74.62f64;
+                let z = 0.65f64;
+                let stance: f64 = y + 1.6;
+
+                let yaw = 0f32;
+                let pitch = 0f32;
+
+                let outer_state;
+                {
+                    let mut state = state.write().await;
+                    state.position_and_look.x = x;
+                    state.position_and_look.y = y;
+                    state.position_and_look.z = z;
+                    state.position_and_look.yaw = yaw;
+                    state.position_and_look.pitch = pitch;
+                    outer_state = (
+                        state.entity_id,
+                        state.position_and_look,
+                        Some(state.username.clone()),
+                    );
+                }
+                entity_tx
+                    .send((outer_state.0, outer_state.1, outer_state.2))
+                    .await
+                    .unwrap();
+
+                let on_ground = true;
+
+                let mut position_look = vec![0x0D];
+                position_look.extend_from_slice(&x.to_be_bytes());
+                // mind stance order
+                position_look.extend_from_slice(&stance.to_be_bytes());
+                position_look.extend_from_slice(&y.to_be_bytes());
+                position_look.extend_from_slice(&z.to_be_bytes());
+
+                position_look.extend_from_slice(&yaw.to_be_bytes());
+                position_look.extend_from_slice(&pitch.to_be_bytes());
+                position_look.extend_from_slice(&[on_ground as u8]);
+
+                stream.write_all(&position_look).await.unwrap();
+                stream.flush().await.unwrap();
+                println!("sent pos");
+
+                state.write().await.logged_in = true;
+            }
+            // Handshake
+            0x02 => {
+                // skip(&mut buf, 1)?;
+                let username = get_string(&mut buf)?;
+                let ch = ClientHandshake { username };
+                stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
+                stream.flush().await.unwrap();
+                println!("ch: {ch:?}");
+            }
+            0x03 => {
+                let message = get_string(&mut buf)?;
+                println!("{message}")
+            }
+            0x0A => {
+                let _on_ground = get_u8(&mut buf)? != 0;
+                // println!("on_ground: {on_ground}");
             }
 
-            println!("sent inv");
+            0x0B => {
+                let x = get_f64(&mut buf)?;
+                let y = get_f64(&mut buf)?;
+                let _stance = get_f64(&mut buf)?;
+                let z = get_f64(&mut buf)?;
+                let _on_ground = get_u8(&mut buf)? != 0;
 
-            let x = 0.27f64;
-            let y = 74.62f64;
-            let z = 0.65f64;
-            let stance: f64 = y + 1.6;
+                let outer_state;
+                {
+                    let mut state = state.write().await;
 
-            let yaw = 0f32;
-            let pitch = 0f32;
-
-            let outer_state;
-            {
-                let mut state = state.write().await;
-                state.position_and_look.x = x;
-                state.position_and_look.y = y;
-                state.position_and_look.z = z;
-                state.position_and_look.yaw = yaw;
-                state.position_and_look.pitch = pitch;
-                outer_state = (
-                    state.entity_id,
-                    state.position_and_look,
-                    Some(state.username.clone()),
-                );
+                    state.position_and_look.x = x;
+                    state.position_and_look.y = y;
+                    state.position_and_look.z = z;
+                    outer_state = (state.entity_id, state.position_and_look);
+                }
+                entity_tx
+                    .send((outer_state.0, outer_state.1, None))
+                    .await
+                    .unwrap();
+                // println!("{x} {y} {stance} {z} {on_ground}");
             }
-            entity_tx
-                .send((outer_state.0, outer_state.1, outer_state.2))
-                .await
-                .unwrap();
 
-            let on_ground = true;
+            0x0C => {
+                let yaw = get_f32(&mut buf)?;
+                let pitch = get_f32(&mut buf)?;
+                let _on_ground = get_u8(&mut buf)? != 0;
 
-            let mut position_look = vec![0x0D];
-            position_look.extend_from_slice(&x.to_be_bytes());
-            // mind stance order
-            position_look.extend_from_slice(&stance.to_be_bytes());
-            position_look.extend_from_slice(&y.to_be_bytes());
-            position_look.extend_from_slice(&z.to_be_bytes());
-
-            position_look.extend_from_slice(&yaw.to_be_bytes());
-            position_look.extend_from_slice(&pitch.to_be_bytes());
-            position_look.extend_from_slice(&[on_ground as u8]);
-
-            stream.write_all(&position_look).await.unwrap();
-            stream.flush().await.unwrap();
-            println!("sent pos");
-
-            state.write().await.logged_in = true;
-        }
-        // Handshake
-        0x02 => {
-            // skip(&mut buf, 1)?;
-            let username = get_string(&mut buf)?;
-            let ch = ClientHandshake { username };
-            stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
-            stream.flush().await.unwrap();
-            println!("ch: {ch:?}");
-        }
-        0x03 => {
-            let message = get_string(&mut buf)?;
-            println!("{message}")
-        }
-        0x0A => {
-            let _on_ground = get_u8(&mut buf)? != 0;
-            // println!("on_ground: {on_ground}");
-        }
-
-        0x0B => {
-            let x = get_f64(&mut buf)?;
-            let y = get_f64(&mut buf)?;
-            let _stance = get_f64(&mut buf)?;
-            let z = get_f64(&mut buf)?;
-            let _on_ground = get_u8(&mut buf)? != 0;
-
-            let outer_state;
-            {
-                let mut state = state.write().await;
-
-                state.position_and_look.x = x;
-                state.position_and_look.y = y;
-                state.position_and_look.z = z;
-                outer_state = (state.entity_id, state.position_and_look);
+                let outer_state;
+                {
+                    let mut state = state.write().await;
+                    state.position_and_look.yaw = yaw;
+                    state.position_and_look.pitch = pitch;
+                    outer_state = (state.entity_id, state.position_and_look);
+                }
+                entity_tx
+                    .send((outer_state.0, outer_state.1, None))
+                    .await
+                    .unwrap();
+                // println!("{yaw} {pitch} {on_ground}");
             }
-            entity_tx
-                .send((outer_state.0, outer_state.1, None))
-                .await
-                .unwrap();
-            // println!("{x} {y} {stance} {z} {on_ground}");
-        }
 
-        0x0C => {
-            let yaw = get_f32(&mut buf)?;
-            let pitch = get_f32(&mut buf)?;
-            let _on_ground = get_u8(&mut buf)? != 0;
+            0x0D => {
+                let x = get_f64(&mut buf)?;
+                let y = get_f64(&mut buf)?;
+                let _stance = get_f64(&mut buf)?;
+                let z = get_f64(&mut buf)?;
+                let yaw = get_f32(&mut buf)?;
+                let pitch = get_f32(&mut buf)?;
+                let _on_ground = get_u8(&mut buf)? != 0;
+                let outer_state;
+                {
+                    let mut state = state.write().await;
+                    state.position_and_look.x = x;
+                    state.position_and_look.y = y;
+                    state.position_and_look.z = z;
+                    state.position_and_look.yaw = yaw;
+                    state.position_and_look.pitch = pitch;
+                    outer_state = (state.entity_id, state.position_and_look);
+                }
+                entity_tx
+                    .send((outer_state.0, outer_state.1, None))
+                    .await
+                    .unwrap();
 
-            let outer_state;
-            {
-                let mut state = state.write().await;
-                state.position_and_look.yaw = yaw;
-                state.position_and_look.pitch = pitch;
-                outer_state = (state.entity_id, state.position_and_look);
+                // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
             }
-            entity_tx
-                .send((outer_state.0, outer_state.1, None))
-                .await
-                .unwrap();
-            // println!("{yaw} {pitch} {on_ground}");
-        }
-
-        0x0D => {
-            let x = get_f64(&mut buf)?;
-            let y = get_f64(&mut buf)?;
-            let _stance = get_f64(&mut buf)?;
-            let z = get_f64(&mut buf)?;
-            let yaw = get_f32(&mut buf)?;
-            let pitch = get_f32(&mut buf)?;
-            let _on_ground = get_u8(&mut buf)? != 0;
-            let outer_state;
-            {
-                let mut state = state.write().await;
-                state.position_and_look.x = x;
-                state.position_and_look.y = y;
-                state.position_and_look.z = z;
-                state.position_and_look.yaw = yaw;
-                state.position_and_look.pitch = pitch;
-                outer_state = (state.entity_id, state.position_and_look);
+            0x12 => {
+                let pid = get_i32(&mut buf)?;
+                let arm_winging = get_u8(&mut buf)? > 0;
+                println!("{pid} {arm_winging}")
             }
-            entity_tx
-                .send((outer_state.0, outer_state.1, None))
-                .await
-                .unwrap();
-
-            // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
-        }
-        0x12 => {
-            let pid = get_i32(&mut buf)?;
-            let arm_winging = get_u8(&mut buf)? > 0;
-            println!("{pid} {arm_winging}")
-        }
-        0xff => {
-            // player.should_disconnect = true;
-            let reason = get_string(&mut buf)?;
-            tx_disconnect.send(state.read().await.entity_id).await.unwrap();
-            println!("{reason}")
-        }
-        _ => {
-            println!("packet_id: {packet_id}");
-            return Err(PacketError::NotEnoughBytes);
+            0xff => {
+                // player.should_disconnect = true;
+                let reason = get_string(&mut buf)?;
+                println!("disconnect: {reason}");
+                tx_disconnect
+                    .send(state.read().await.entity_id)
+                    .await
+                    .unwrap();
+            }
+            _ => {
+                println!("packet_id: {packet_id}");
+                return Err(PacketError::NotEnoughBytes);
+            }
         }
     }
     Ok(buf.position() as usize)
