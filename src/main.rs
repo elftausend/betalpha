@@ -1,18 +1,27 @@
 mod packet;
 
 use std::{io::{Cursor, Read, Write}, sync::Arc};
+use std::{
+    collections::HashSet,
+    future::Future,
+    pin::Pin,
+    sync::atomic::{AtomicBool, AtomicI32, Ordering},
+};
 
 use bytes::{Buf, BytesMut};
 
-
-use nbt::{Blob, Value};
+use nbt::{Blob, Map, Value};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream}, sync::RwLock,
+    net::{TcpListener, TcpStream},
+    sync::{broadcast::channel, mpsc::Sender, RwLock},
 };
 use crate::packet::PacketError;
 use crate::packet::util::*;
+
+// mod byte_man;
+// pub use byte_man::*;
 
 fn base36_to_base10(input: i8) -> i32 {
     let mut result = 0;
@@ -38,6 +47,45 @@ fn test_base_conv() {
 
 extern crate libz_sys;
 
+use libz_sys::{deflate, deflateEnd, deflateInit_, z_stream, Z_OK, Z_STREAM_END};
+
+fn test_libz() {
+    // libz_sys::compress(dest, destLen, source, sourceLen)
+    // Original data
+    let original_data = b"Hello, world!";
+    /*
+    // Initialize the z_stream structure
+    let mut stream = z_stream {
+        next_in: original_data.as_ptr() as *mut _,
+        avail_in: original_data.len() as u32,
+        ..Default::default()
+    };
+
+    // Initialize the deflate stream
+    let mut ret = unsafe { deflateInit_(&mut stream, libz_sys::Z_DEFAULT_COMPRESSION) };
+    assert_eq!(ret, Z_OK);
+
+    // Buffer to hold compressed data
+    let mut compressed_data = vec![0u8; original_data.len() * 2];
+
+    // Set the output buffer
+    stream.next_out = compressed_data.as_mut_ptr() as *mut _;
+    stream.avail_out = compressed_data.len() as u32;
+
+    // Perform the compression
+    ret = unsafe { deflate(&mut stream, libz_sys::Z_FINISH) };
+    assert_eq!(ret, Z_STREAM_END);
+
+    // Clean up the deflate stream
+    ret = unsafe { deflateEnd(&mut stream) };
+    assert_eq!(ret, Z_OK);
+
+    // Resize the compressed_data vector to the actual size
+    compressed_data.resize((stream.next_out as usize - compressed_data.as_ptr() as usize) / std::mem::size_of::<u8>(), 0);
+
+    println!("Compressed data: {:?}", compressed_data);*/
+}
+
 pub struct Chunk {
     chunk_x: i32,
     chunk_z: i32,
@@ -48,28 +96,36 @@ pub struct Chunk {
     height_map: Vec<u8>,
 }
 
-#[derive(Debug)]
-pub struct Player {
-    protocol_version: i32,
-    logged_in: bool,
-    should_disconnect: bool,
-    username: String,
-    x: f64,
-    y: f64,
-    z: f64,
-    stance: f64,
-    on_ground: bool,
-    yaw: f32,
-    pitch: f32,
+type PacketHandler = Box<
+    dyn FnOnce(
+        &mut Cursor<&[u8]>,
+        &mut TcpStream,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>,
+>;
+
+#[inline]
+pub async fn incomplete(buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), Error> {
+    Err(Error::Incomplete)
+}
+
+fn force_boxed<T>(f: fn(&mut Cursor<&[u8]>, &mut TcpStream) -> T) -> PacketHandler
+where
+    T: Future<Output = Result<(), Error>> + 'static,
+{
+    Box::new(move |buf, stream| Box::pin(f(buf, stream)))
 }
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("0.0.0.0:25565").await.unwrap();
 
+    // force_boxed::<_>(keep_alive);
+    // let mut packet_handlers: Vec<PacketHandler> = vec![force_boxed(incomplete)];
+    // packet_handlers[0x00] = keep_alive;
+
     // let mut chunks = Vec::new();
     let dirs = walkdir::WalkDir::new("./World2/")
-    // let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
+        // let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
         .into_iter()
         .collect::<Vec<_>>();
 
@@ -157,11 +213,32 @@ async fn main() {
         .collect::<Vec<_>>();
 
     let chunks = &*Box::leak(chunks.into_boxed_slice());
+    let (pos_and_look_tx, mut pos_and_look_rx) =
+        tokio::sync::mpsc::channel::<(i32, PositionAndLook)>(256);
+    let (pos_and_look_update_tx, mut pos_and_look_update_rx) =
+        tokio::sync::broadcast::channel::<(i32, PositionAndLook, Option<PositionAndLook>)>(256);
+
+    let mut entities = std::collections::HashMap::new();
+    let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Some((eid, pos_and_look)) = pos_and_look_rx.recv().await {
+                let prev_pos_and_look = entities.insert(eid, pos_and_look);
+                pos_and_look_update_tx_inner
+                    .send((eid, pos_and_look, prev_pos_and_look))
+                    .unwrap();
+
+                if entities.contains_key(&eid) {}
+            }
+        }
+    });
 
     loop {
+        let pos_and_look_tx = pos_and_look_tx.clone();
+        let pos_and_look_update_rx = pos_and_look_update_tx.clone().subscribe();
         let stream = listener.accept().await.unwrap();
         tokio::spawn(async move {
-            handle_client(stream.0, chunks).await;
+            handle_client(stream.0, chunks, pos_and_look_tx, pos_and_look_update_rx).await;
         });
     }
 }
@@ -173,16 +250,79 @@ pub struct ClientHandshake {
     username: String,
 }
 
+pub enum Error {
+    Incomplete,
+}
+
+pub async fn keep_alive(_buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), PacketError> {
+    let packet = vec![0];
+    stream.write_all(&packet).await.unwrap();
+    stream.flush().await.unwrap();
+    Ok(())
+}
+
+pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> tokio::io::Result<()> {
+    let mut pre_chunk = vec![0x32];
+    pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
+    pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
+    pre_chunk.extend_from_slice(&[1u8]);
+
+    stream.write_all(&pre_chunk).await?;
+    stream.flush().await?;
+
+    let mut map_chunk = vec![0x33];
+    let x = chunk.chunk_x * 16;
+    let y = 0i16;
+    let z = chunk.chunk_z * 16;
+
+    map_chunk.extend_from_slice(&x.to_be_bytes());
+    map_chunk.extend_from_slice(&y.to_be_bytes());
+    map_chunk.extend_from_slice(&z.to_be_bytes());
+
+    map_chunk.extend_from_slice(&15u8.to_be_bytes());
+    map_chunk.extend_from_slice(&127u8.to_be_bytes());
+    map_chunk.extend_from_slice(&15u8.to_be_bytes());
+
+    let mut to_compress = chunk.blocks.clone();
+    to_compress.extend_from_slice(&chunk.data);
+    to_compress.extend_from_slice(&chunk.block_light);
+    to_compress.extend_from_slice(&chunk.sky_light);
+
+    unsafe {
+        let mut len = libz_sys::compressBound(to_compress.len() as u64);
+        let mut compressed_bytes = vec![0u8; len as usize];
+        libz_sys::compress(
+            compressed_bytes.as_mut_ptr(),
+            &mut len,
+            to_compress.as_ptr(),
+            to_compress.len() as u64,
+        );
+
+        map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
+        map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
+    }
+
+    stream.write_all(&map_chunk).await?;
+    stream.flush().await
+}
+fn get_id() -> i32 {
+    static COUNTER: AtomicI32 = AtomicI32::new(1);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
 // add checking with peak (faster)
 async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
     chunks: &[Chunk],
-    player: &mut Player,
+    state: &RwLock<State>,
+    entity_tx: &Sender<(i32, PositionAndLook)>,
+    logged_in: &AtomicBool,
 ) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
 
     let packet_id = get_u8(&mut buf)?;
+    // println!("packet_id: {packet_id}");
 
     // println!("buf: {buf:?}");
 
@@ -192,14 +332,8 @@ async fn parse_packet(
     // }
 
     match packet_id {
-        // Keep Alive
-        0x00 => {
-            let packet = vec![0];
-            stream.write_all(&packet).await.unwrap();
-            stream.flush().await.unwrap();
-        }
-        // Login Request
-        0x01 => {
+        0 => keep_alive(&mut buf, stream).await?,
+        1 => {
             let protocol_version = get_i32(&mut buf)?;
             // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
@@ -208,7 +342,7 @@ async fn parse_packet(
             let _map_seed = get_u64(&mut buf)?;
             let _dimension = get_i8(&mut buf)?;
 
-            let entity_id = 1337i32;
+            let entity_id = get_id();
             // let seed = 1111423422i64;
             let seed: i64 = 9065250152070435348;
             // let seed: i64 = -4264101711260417039;
@@ -229,71 +363,15 @@ async fn parse_packet(
 
             println!("protocol_version {protocol_version}");
             println!("username {username}");
+            {
+                let mut state = state.write().await;
+                state.username = username;
+                state.entity_id = entity_id;
+            }
+            logged_in.store(true, Ordering::Relaxed);
 
-            player.protocol_version = protocol_version;
-            player.username = username;
-
-            player.logged_in = true;
             for chunk in chunks.iter() {
-                let mut pre_chunk = vec![0x32];
-                pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
-                pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
-                pre_chunk.extend_from_slice(&[1u8]);
-
-                stream.write_all(&pre_chunk).await.unwrap();
-                stream.flush().await.unwrap();
-
-                let mut map_chunk = vec![0x33];
-                let x = chunk.chunk_x * 16;
-                let y = 0i16;
-                let z = chunk.chunk_z * 16;
-                // println!("cx: {}, cz: {}, x: {x}, z: {z}", chunk.chunk_x, chunk.chunk_z);
-                // map_chunk.extend_from_slice(&[0 ]);
-                map_chunk.extend_from_slice(&x.to_be_bytes());
-                map_chunk.extend_from_slice(&y.to_be_bytes());
-                map_chunk.extend_from_slice(&z.to_be_bytes());
-
-                map_chunk.extend_from_slice(&15u8.to_be_bytes());
-                map_chunk.extend_from_slice(&127u8.to_be_bytes());
-                map_chunk.extend_from_slice(&15u8.to_be_bytes());
-                // println!("map_chunk: {map_chunk:?}");
-
-                let mut to_compress = chunk.blocks.clone();
-                to_compress.extend_from_slice(&chunk.data);
-                to_compress.extend_from_slice(&chunk.block_light);
-                to_compress.extend_from_slice(&chunk.sky_light);
-
-                assert_eq!(to_compress.len(), ((16 * 128 * 16) as f32 * 2.5) as usize);
-
-                // let mut e = DeflateEncoder::new(Vec::new(), Compression::default());
-                // e.write_all(&to_compress).unwrap();
-
-                // let compressed_bytes = e.finish().unwrap();
-
-                // let compressed_bytes = deflate::deflate_bytes_conf(&to_compress, deflate::Compression::Fast);
-                // map_chunk.extend_from_slice(&[0 ]);
-                // let compressed_bytes = deflate::deflate_bytes(&to_compress);
-
-                unsafe {
-                    let mut len = libz_sys::compressBound(to_compress.len() as u64);
-                    let mut compressed_bytes = vec![0u8; len as usize];
-                    libz_sys::compress(
-                        compressed_bytes.as_mut_ptr(),
-                        &mut len,
-                        to_compress.as_ptr(),
-                        to_compress.len() as u64,
-                    );
-
-                    map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
-                    map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
-                }
-
-                // let data = std::fs::read("compressed_c_bytes").unwrap();
-                // let compressed_bytes = data.split(' ').map(|x| x.parse::<i8>().unwrap().to_be_bytes()[0]).collect::<Vec<_>>();
-                // let compressed_bytes = data;
-
-                stream.write_all(&map_chunk).await.unwrap();
-                stream.flush().await.unwrap();
+                send_chunk(chunk, stream).await.unwrap();
             }
             println!("sent map");
 
@@ -326,19 +404,35 @@ async fn parse_packet(
             println!("sent inv");
 
             let x = 0.27f64;
-            let y = 80.62f64;
+            let y = 74.62f64;
             let z = 0.65f64;
             let stance: f64 = y + 1.6;
 
             let yaw = 0f32;
             let pitch = 0f32;
 
+            let mut outer_state = None;
+            {
+                let mut state = state.write().await;
+                state.position_and_look.x = x;
+                state.position_and_look.y = y;
+                state.position_and_look.z = z;
+                state.position_and_look.yaw = yaw;
+                state.position_and_look.pitch = pitch;
+                outer_state = Some((state.entity_id, state.position_and_look));
+            }
+            entity_tx
+                .send((outer_state.unwrap().0, outer_state.unwrap().1))
+                .await
+                .unwrap();
+
             let on_ground = true;
 
             let mut position_look = vec![0x0D];
             position_look.extend_from_slice(&x.to_be_bytes());
-            position_look.extend_from_slice(&y.to_be_bytes());
+            // mind stance order
             position_look.extend_from_slice(&stance.to_be_bytes());
+            position_look.extend_from_slice(&y.to_be_bytes());
             position_look.extend_from_slice(&z.to_be_bytes());
 
             position_look.extend_from_slice(&yaw.to_be_bytes());
@@ -348,6 +442,8 @@ async fn parse_packet(
             stream.write_all(&position_look).await.unwrap();
             stream.flush().await.unwrap();
             println!("sent pos");
+
+            state.write().await.logged_in = true;
         }
         // Handshake
         0x02 => {
@@ -363,31 +459,77 @@ async fn parse_packet(
             println!("{message}")
         }
         0x0A => {
-            player.on_ground = get_u8(&mut buf)? != 0;
+            let on_ground = get_u8(&mut buf)? != 0;
+            // println!("on_ground: {on_ground}");
         }
 
         0x0B => {
-            player.x = get_f64(&mut buf)?;
-            player.y = get_f64(&mut buf)?;
-            player.stance = get_f64(&mut buf)?;
-            player.z = get_f64(&mut buf)?;
-            player.on_ground = get_u8(&mut buf)? != 0;
+            let x = get_f64(&mut buf)?;
+            let y = get_f64(&mut buf)?;
+            let stance = get_f64(&mut buf)?;
+            let z = get_f64(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+
+            let outer_state;
+            {
+                let mut state = state.write().await;
+
+                state.position_and_look.x = x;
+                state.position_and_look.y = y;
+                state.position_and_look.z = z;
+                outer_state = (state.entity_id, state.position_and_look);
+            }
+            entity_tx
+                .send((outer_state.0, outer_state.1))
+                .await
+                .unwrap();
+
+            // println!("{x} {y} {stance} {z} {on_ground}");
         }
 
         0x0C => {
-            player.yaw = get_f32(&mut buf)?;
-            player.pitch = get_f32(&mut buf)?;
-            player.on_ground = get_u8(&mut buf)? != 0;
+            let yaw = get_f32(&mut buf)?;
+            let pitch = get_f32(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+
+            let outer_state;
+            {
+                let mut state = state.write().await;
+                state.position_and_look.yaw = yaw;
+                state.position_and_look.pitch = pitch;
+                outer_state = (state.entity_id, state.position_and_look);
+            }
+            entity_tx
+                .send((outer_state.0, outer_state.1))
+                .await
+                .unwrap();
+            // println!("{yaw} {pitch} {on_ground}");
         }
 
         0x0D => {
-            player.x = get_f64(&mut buf)?;
-            player.y = get_f64(&mut buf)?;
-            player.stance = get_f64(&mut buf)?;
-            player.z = get_f64(&mut buf)?;
-            player.yaw = get_f32(&mut buf)?;
-            player.pitch = get_f32(&mut buf)?;
-            player.on_ground = get_u8(&mut buf)? != 0;
+            let x = get_f64(&mut buf)?;
+            let y = get_f64(&mut buf)?;
+            let stance = get_f64(&mut buf)?;
+            let z = get_f64(&mut buf)?;
+            let yaw = get_f32(&mut buf)?;
+            let pitch = get_f32(&mut buf)?;
+            let on_ground = get_u8(&mut buf)? != 0;
+            let outer_state;
+            {
+                let mut state = state.write().await;
+                state.position_and_look.x = x;
+                state.position_and_look.y = y;
+                state.position_and_look.z = z;
+                state.position_and_look.yaw = yaw;
+                state.position_and_look.pitch = pitch;
+                outer_state = (state.entity_id, state.position_and_look);
+            }
+            entity_tx
+                .send((outer_state.0, outer_state.1))
+                .await
+                .unwrap();
+
+            // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
         }
         0x12 => {
             let pid = get_i32(&mut buf)?;
@@ -395,7 +537,7 @@ async fn parse_packet(
             println!("{pid} {arm_winging}")
         }
         0xff => {
-            player.should_disconnect = true;
+            // player.should_disconnect = true;
             let reason = get_string(&mut buf)?;
             println!("{reason}")
         }
@@ -407,38 +549,177 @@ async fn parse_packet(
     Ok(buf.position() as usize)
 }
 
-async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
+pub struct State {
+    entity_id: i32,
+    username: String,
+    logged_in: bool,
+    position_and_look: PositionAndLook,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PositionAndLook {
+    x: f64,
+    y: f64,
+    z: f64,
+    yaw: f32,
+    pitch: f32,
+}
+
+async fn handle_client(
+    mut stream: TcpStream,
+    chunks: &[Chunk],
+    entity_tx: Sender<(i32, PositionAndLook)>,
+    mut entity_move_rx: tokio::sync::broadcast::Receiver<(
+        i32,
+        PositionAndLook,
+        Option<PositionAndLook>,
+    )>,
+) {
     let mut buf = BytesMut::with_capacity(SIZE);
 
     let stream = Arc::new(RwLock::new(stream));
     let keep_alive_stream = stream.clone();
-    let mut player = Player {
-        protocol_version: 0,
-        logged_in: false,
-        should_disconnect: false,
+    let pos_update_stream = stream.clone();
+
+    let mut state = Arc::new(RwLock::new(State {
+        entity_id: 0,
         username: "".to_string(),
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-        stance: 0.0,
-        on_ground: false,
-        yaw: 0.0,
-        pitch: 0.0,
-    };
+        logged_in: false,
+        position_and_look: PositionAndLook {
+            x: 0.,
+            y: 0.,
+            z: 0.,
+            yaw: 0.,
+            pitch: 0.,
+        },
+    }));
+
+    let logged_in = Arc::new(AtomicBool::new(false));
+
+    let logged_in_inner = logged_in.clone();
+    let state_pos_update = state.clone();
+    tokio::task::spawn(async move {
+        let mut seen_before = HashSet::new();
+        loop {
+            if !logged_in_inner.load(Ordering::Relaxed) {
+                // tokio::time::sleep(std::time::Duration::from_secs_f64(0.1)).await;
+                continue;
+            }
+            let Ok((eid, now, prev)) = entity_move_rx.recv().await else {
+                continue;
+            };
+
+            if eid == state_pos_update.read().await.entity_id {
+                continue;
+            }
+
+            // println!(
+            //     "i am: {}, moved: {eid} {now:?}, prev: {prev:?}",
+            //     state_pos_update.read().await.entity_id
+            // );
+
+            if !seen_before.contains(&eid) {
+                println!("not seen");
+                let mut named_entity_join = vec![0x14];
+                named_entity_join.extend_from_slice(&eid.to_be_bytes());
+                {
+                    let state = state_pos_update.read().await;
+
+                    // wrong user, but ignore for now
+                    let username = &state.username;
+                    named_entity_join.extend_from_slice(&(username.len() as i16).to_be_bytes());
+                    named_entity_join.extend_from_slice(username.as_bytes());
+                    let x = (now.x * 32.).round() as i32;
+                    let y = (now.y * 32.).round() as i32;
+                    let z = (now.z * 32.).round() as i32;
+
+                    named_entity_join.extend_from_slice(&x.to_be_bytes());
+                    named_entity_join.extend_from_slice(&y.to_be_bytes());
+                    named_entity_join.extend_from_slice(&z.to_be_bytes());
+                    named_entity_join.extend_from_slice(&[0, 0, 0, 0]);
+                }
+
+                let mut pos_update_stream = pos_update_stream.write().await;
+                pos_update_stream
+                    .write_all(&named_entity_join)
+                    .await
+                    .unwrap();
+                pos_update_stream.flush().await.unwrap();
+
+                let mut entity_spawn = vec![0x1E];
+                entity_spawn.extend_from_slice(&eid.to_be_bytes());
+
+                pos_update_stream.write_all(&entity_spawn).await.unwrap();
+                pos_update_stream.flush().await.unwrap();
+            }
+
+            seen_before.insert(eid);
+
+            if let Some(prev) = prev {
+                // check if travelled blocks is > 4 (teleport)
+
+                let x = ((now.x - prev.x) * 32.).round() as i8;
+                let y = ((now.y - prev.y) * 32.).round() as i8;
+                let z = ((now.z - prev.z) * 32.).round() as i8;
+                let yawf = ((now.yaw / 360.) * 255.) % 255.;
+                let pitch = (((now.pitch / 360.) * 255.) % 255.) as i8;
+
+                let mut yaw = yawf as i8;
+                if yawf < -128. {
+                    yaw = 127 - (yawf + 128.).abs() as i8
+                }
+                if yawf > 128. {
+                    yaw = -128 + (yawf - 128.).abs() as i8
+                }
+
+                // println!("yaw: {yawf} {} pitch: {pitch}", yaw);
+
+                let mut entity_look_and_move = vec![0x21];
+                entity_look_and_move.extend_from_slice(&eid.to_be_bytes());
+                entity_look_and_move.extend_from_slice(&[
+                    x.to_be_bytes()[0],
+                    y.to_be_bytes()[0],
+                    z.to_be_bytes()[0],
+                    yaw.to_be_bytes()[0],
+                    pitch.to_be_bytes()[0],
+                ]);
+
+                let mut pos_update_stream = pos_update_stream.write().await;
+                pos_update_stream
+                    .write_all(&entity_look_and_move)
+                    .await
+                    .unwrap();
+                pos_update_stream.flush().await.unwrap();
+            }
+        }
+    });
 
     tokio::task::spawn(async move {
         loop {
             let packet = vec![0];
-            keep_alive_stream.write().await.write_all(&packet).await.unwrap();
+            keep_alive_stream
+                .write()
+                .await
+                .write_all(&packet)
+                .await
+                .unwrap();
             keep_alive_stream.write().await.flush().await.unwrap();
-        
+
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
     });
-        
 
     loop {
-        if let Ok(n) = parse_packet(&mut *stream.write().await, &buf, chunks, &mut player).await {
+        if let Ok(n) = parse_packet(
+            &mut *stream.write().await,
+            &buf,
+            chunks,
+            &state,
+            &entity_tx,
+            &logged_in,
+        )
+        .await
+        {
             buf.advance(n);
         }
 
@@ -447,6 +728,6 @@ async fn handle_client(mut stream: TcpStream, chunks: &[Chunk]) {
             break;
         }
 
-        println!("{player:?}")
+        // println!("{player:?}")
     }
 }
