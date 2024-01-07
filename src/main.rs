@@ -1,13 +1,4 @@
-use std::{
-    collections::HashSet,
-    future::Future,
-    io::Cursor,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicBool, AtomicI32, Ordering},
-        Arc,
-    },
-};
+use std::{sync::{atomic::{AtomicBool, AtomicI32, Ordering}, Arc}, io::Cursor, pin::Pin, future::Future, collections::HashSet};
 
 use bytes::{Buf, BytesMut};
 
@@ -23,10 +14,17 @@ use tokio::{
     },
 };
 
-mod byte_man;
-pub use byte_man::*;
+mod packet;
+
+
+use crate::packet::PacketError;
+use crate::packet::util::*;
+
+// mod byte_man;
+// pub use byte_man::*;
 
 mod entities;
+
 
 fn base36_to_base10(input: i8) -> i32 {
     let mut result = 0;
@@ -305,7 +303,7 @@ pub enum Error {
     Incomplete,
 }
 
-pub async fn keep_alive(_buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), Error> {
+pub async fn keep_alive(_buf: &mut Cursor<&[u8]>, stream: &mut TcpStream) -> Result<(), PacketError> {
     let packet = vec![0];
     stream.write_all(&packet).await.unwrap();
     stream.flush().await.unwrap();
@@ -369,7 +367,7 @@ async fn parse_packet(
     state: &RwLock<State>,
     entity_tx: &Sender<(i32, PositionAndLook, Option<String>)>,
     logged_in: &AtomicBool,
-) -> Result<usize, Error> {
+) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
 
     let packet_id = get_u8(&mut buf)?;
@@ -491,7 +489,8 @@ async fn parse_packet(
 
             state.write().await.logged_in = true;
         }
-        2 => {
+        // Handshake
+        0x02 => {
             // skip(&mut buf, 1)?;
             let username = get_string(&mut buf)?;
             let ch = ClientHandshake { username };
@@ -499,7 +498,10 @@ async fn parse_packet(
             stream.flush().await.unwrap();
             println!("ch: {ch:?}");
         }
-
+        0x03 => {
+            let message = get_string(&mut buf)?;
+            println!("{message}")
+        }
         0x0A => {
             let on_ground = get_u8(&mut buf)? != 0;
             // println!("on_ground: {on_ground}");
@@ -572,7 +574,20 @@ async fn parse_packet(
 
             // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
         }
-        _ => return Err(Error::Incomplete),
+        0x12 => {
+            let pid = get_i32(&mut buf)?;
+            let arm_winging = get_u8(&mut buf)? > 0;
+            println!("{pid} {arm_winging}")
+        }
+        0xff => {
+            // player.should_disconnect = true;
+            let reason = get_string(&mut buf)?;
+            println!("{reason}")
+        }
+        _ => {
+            println!("packet_id: {packet_id}");
+            return Err(PacketError::NotEnoughBytes)
+        },
     }
     Ok(buf.position() as usize)
 }
@@ -758,6 +773,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
             println!("break");
             break;
         }
+
+        // println!("{player:?}")
     }
 
     tx_destroy_self_entity.send(state.read().await.entity_id).await.unwrap();
