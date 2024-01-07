@@ -340,26 +340,11 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
     .send(stream)
     .await?;
 
-    // let mut pre_chunk = vec![0x32];
-    // pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
-    // pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
-    // pre_chunk.extend_from_slice(&[1u8]);
-
-    // stream.write_all(&pre_chunk).await?;
-    // stream.flush().await?;
 
     // let mut map_chunk = vec![0x33];
     let x = chunk.chunk_x * 16;
     let y = 0i16;
     let z = chunk.chunk_z * 16;
-
-    // map_chunk.extend_from_slice(&x.to_be_bytes());
-    // map_chunk.extend_from_slice(&y.to_be_bytes());
-    // map_chunk.extend_from_slice(&z.to_be_bytes());
-
-    // map_chunk.extend_from_slice(&15u8.to_be_bytes());
-    // map_chunk.extend_from_slice(&127u8.to_be_bytes());
-    // map_chunk.extend_from_slice(&15u8.to_be_bytes());
 
     let mut to_compress = chunk.blocks.clone();
     to_compress.extend_from_slice(&chunk.data);
@@ -388,12 +373,8 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
         }
         .send(stream)
         .await?;
-        // map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
-        // map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
     }
 
-    // stream.write_all(&map_chunk).await.unwrap();
-    // stream.flush().await.unwrap();
     Ok(())
 }
 fn get_id() -> i32 {
@@ -408,6 +389,7 @@ async fn parse_packet(
     chunks: &[Chunk],
     state: &RwLock<State>,
     entity_tx: &Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_disconnect: &Sender<i32>,
     logged_in: &AtomicBool,
 ) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
@@ -631,6 +613,7 @@ async fn parse_packet(
         0xff => {
             // player.should_disconnect = true;
             let reason = get_string(&mut buf)?;
+            tx_disconnect.send(state.read().await.entity_id).await.unwrap();
             println!("{reason}")
         }
         _ => {
@@ -811,6 +794,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
             chunks,
             &state,
             &tx_player_pos_and_look,
+            &tx_destroy_self_entity,
             &logged_in,
         )
         .await
