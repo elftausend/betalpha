@@ -16,11 +16,17 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{broadcast::channel, mpsc::Sender, RwLock},
+    sync::{
+        broadcast::{self, channel},
+        mpsc::{self, Sender},
+        RwLock,
+    },
 };
 
 mod byte_man;
 pub use byte_man::*;
+
+mod entities;
 
 fn base36_to_base10(input: i8) -> i32 {
     let mut result = 0;
@@ -47,6 +53,8 @@ fn test_base_conv() {
 extern crate libz_sys;
 
 use libz_sys::{deflate, deflateEnd, deflateInit_, z_stream, Z_OK, Z_STREAM_END};
+
+use crate::entities::spawned_named_entity;
 
 fn test_libz() {
     // libz_sys::compress(dest, destLen, source, sourceLen)
@@ -212,34 +220,41 @@ async fn main() {
         .collect::<Vec<_>>();
 
     let chunks = &*Box::leak(chunks.into_boxed_slice());
-    let (pos_and_look_tx, mut pos_and_look_rx) =
-        tokio::sync::mpsc::channel::<(i32, PositionAndLook)>(256);
-    let (pos_and_look_update_tx, mut pos_and_look_update_rx) =
-        tokio::sync::broadcast::channel::<(i32, PositionAndLook, Option<PositionAndLook>)>(256);
+    let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook)>(256);
 
-    let mut entities = std::collections::HashMap::new();
+    let (pos_and_look_update_tx, mut pos_and_look_update_rx) =
+        broadcast::channel(256);
+
+    let mut entity_positions = std::collections::HashMap::new();
+
     let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
     tokio::spawn(async move {
         loop {
             if let Some((eid, pos_and_look)) = pos_and_look_rx.recv().await {
-                let prev_pos_and_look = entities.insert(eid, pos_and_look);
+                let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
                 pos_and_look_update_tx_inner
-                    .send((eid, pos_and_look, prev_pos_and_look))
+                    .send((eid, entities::Type::Player, pos_and_look, prev_pos_and_look))
                     .unwrap();
-
-                if entities.contains_key(&eid) {}
             }
         }
     });
 
     loop {
-        let pos_and_look_tx = pos_and_look_tx.clone();
-        let pos_and_look_update_rx = pos_and_look_update_tx.clone().subscribe();
+        let channels = Channels {
+            tx_player_pos_and_look: pos_and_look_tx.clone(),
+            rx_entity_movement: pos_and_look_update_tx.clone().subscribe(),
+        };
+
         let stream = listener.accept().await.unwrap();
         tokio::spawn(async move {
-            handle_client(stream.0, chunks, pos_and_look_tx, pos_and_look_update_rx).await;
+            handle_client(stream.0, chunks, channels).await;
         });
     }
+}
+
+pub struct Channels {
+    tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook)>,
+    rx_entity_movement: broadcast::Receiver<(i32, entities::Type, PositionAndLook, Option<PositionAndLook>)>,
 }
 
 const SIZE: usize = 1024 * 8;
@@ -325,11 +340,6 @@ async fn parse_packet(
 
     // println!("buf: {buf:?}");
 
-    // remove later
-    // if *logged_in {
-    //     return Ok(buf.remaining() as usize);
-    // }
-
     match packet_id {
         0 => keep_alive(&mut buf, stream).await?,
         1 => {
@@ -410,7 +420,7 @@ async fn parse_packet(
             let yaw = 0f32;
             let pitch = 0f32;
 
-            let mut outer_state = None;
+            let outer_state;
             {
                 let mut state = state.write().await;
                 state.position_and_look.x = x;
@@ -418,10 +428,10 @@ async fn parse_packet(
                 state.position_and_look.z = z;
                 state.position_and_look.yaw = yaw;
                 state.position_and_look.pitch = pitch;
-                outer_state = Some((state.entity_id, state.position_and_look));
+                outer_state = (state.entity_id, state.position_and_look);
             }
             entity_tx
-                .send((outer_state.unwrap().0, outer_state.unwrap().1))
+                .send((outer_state.0, outer_state.1))
                 .await
                 .unwrap();
 
@@ -478,7 +488,6 @@ async fn parse_packet(
                 .send((outer_state.0, outer_state.1))
                 .await
                 .unwrap();
-
             // println!("{x} {y} {stance} {z} {on_ground}");
         }
 
@@ -547,23 +556,20 @@ pub struct PositionAndLook {
     pitch: f32,
 }
 
-async fn handle_client(
-    mut stream: TcpStream,
-    chunks: &[Chunk],
-    entity_tx: Sender<(i32, PositionAndLook)>,
-    mut entity_move_rx: tokio::sync::broadcast::Receiver<(
-        i32,
-        PositionAndLook,
-        Option<PositionAndLook>,
-    )>,
-) {
+
+async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) {
     let mut buf = BytesMut::with_capacity(SIZE);
+
+    let Channels {
+        tx_player_pos_and_look,
+        mut rx_entity_movement,
+    } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
     let keep_alive_stream = stream.clone();
     let pos_update_stream = stream.clone();
 
-    let mut state = Arc::new(RwLock::new(State {
+    let state = Arc::new(RwLock::new(State {
         entity_id: 0,
         username: "".to_string(),
         logged_in: false,
@@ -583,11 +589,12 @@ async fn handle_client(
     tokio::task::spawn(async move {
         let mut seen_before = HashSet::new();
         loop {
+            // single core servers
+            tokio::time::sleep(std::time::Duration::from_secs_f64(0.001)).await;
             if !logged_in_inner.load(Ordering::Relaxed) {
-                // tokio::time::sleep(std::time::Duration::from_secs_f64(0.1)).await;
                 continue;
             }
-            let Ok((eid, now, prev)) = entity_move_rx.recv().await else {
+            let Ok((eid, ty, now, prev)) = rx_entity_movement.recv().await else {
                 continue;
             };
 
@@ -595,38 +602,21 @@ async fn handle_client(
                 continue;
             }
 
+            // TODO: add eid is in reach check, unload/destroy entity
+            // FIXME: could potentially receive a lot of data / entity information that is intantly discarded
+
             // println!(
             //     "i am: {}, moved: {eid} {now:?}, prev: {prev:?}",
             //     state_pos_update.read().await.entity_id
             // );
 
             if !seen_before.contains(&eid) {
-                println!("not seen");
-                let mut named_entity_join = vec![0x14];
-                named_entity_join.extend_from_slice(&eid.to_be_bytes());
-                {
-                    let state = state_pos_update.read().await;
-
-                    // wrong user, but ignore for now
-                    let username = &state.username;
-                    named_entity_join.extend_from_slice(&(username.len() as i16).to_be_bytes());
-                    named_entity_join.extend_from_slice(username.as_bytes());
-                    let x = (now.x * 32.).round() as i32;
-                    let y = (now.y * 32.).round() as i32;
-                    let z = (now.z * 32.).round() as i32;
-
-                    named_entity_join.extend_from_slice(&x.to_be_bytes());
-                    named_entity_join.extend_from_slice(&y.to_be_bytes());
-                    named_entity_join.extend_from_slice(&z.to_be_bytes());
-                    named_entity_join.extend_from_slice(&[0, 0, 0, 0]);
-                }
-
                 let mut pos_update_stream = pos_update_stream.write().await;
-                pos_update_stream
-                    .write_all(&named_entity_join)
-                    .await
-                    .unwrap();
-                pos_update_stream.flush().await.unwrap();
+
+                match ty {
+                    entities::Type::Player => spawned_named_entity(&mut pos_update_stream, eid, "Stefan", &now).await
+                };
+
 
                 let mut entity_spawn = vec![0x1E];
                 entity_spawn.extend_from_slice(&eid.to_be_bytes());
@@ -697,7 +687,7 @@ async fn handle_client(
             &buf,
             chunks,
             &state,
-            &entity_tx,
+            &tx_player_pos_and_look,
             &logged_in,
         )
         .await
