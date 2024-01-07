@@ -11,10 +11,10 @@ mod to_client_packets {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct LoginResponsePacket {
-        pub entity_id: u32,
+        pub entity_id: i32,
         pub _unused1: String,
         pub _unused2: String,
-        pub map_seed: u64,
+        pub map_seed: i64,
         pub dimension: u8,
     }
 
@@ -231,7 +231,7 @@ mod to_client_packets {
     }
 
     impl Serialize for MultiBlockChangePacket {
-        fn serialize(&mut self) -> Result<Vec<u8>, PacketError> {
+        fn serialize(&self) -> Result<Vec<u8>, PacketError> {
             let mut serializer = PacketSerializer::default();
             serializer.serialize_i32(self.chunk_x)?;
             serializer.serialize_i32(self.chunk_y)?;
@@ -308,7 +308,7 @@ mod to_client_packets {
     }
 }
 
-mod to_server_packets {
+pub mod to_server_packets {
     use super::super::parse::PacketSerializer;
     use super::super::PacketError;
     use betalpha_derive::{Deserialize, Serialize};
@@ -432,3 +432,6 @@ mod to_server_packets {
         pub reason: String,
     }
 }
+
+pub use to_client_packets::*;
+pub use to_server_packets::*;

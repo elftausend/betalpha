@@ -25,7 +25,7 @@ use tokio::{
 
 mod packet;
 
-use crate::packet::util::*;
+use crate::packet::{util::*, Deserialize, Serialize};
 use crate::packet::PacketError;
 
 // mod byte_man;
@@ -399,31 +399,42 @@ async fn parse_packet(
     match packet_id {
         0 => keep_alive(&mut buf, stream).await?,
         1 => {
-            let protocol_version = get_i32(&mut buf)?;
-            // skip(&mut buf, 1)?;
-            let username = get_string(&mut buf)?;
-            // skip(&mut buf, 1)?;
-            let _password = get_string(&mut buf)?;
-            let _map_seed = get_u64(&mut buf)?;
-            let _dimension = get_i8(&mut buf)?;
+            let login_request = packet::LoginRequestPacket::nested_deserialize(&mut buf)?;
+            let protocol_version = login_request.protocol_version;
+            let username = login_request.username;
+            // let protocol_version = get_i32(&mut buf)?;
+            // // skip(&mut buf, 1)?;
+            // let username = get_string(&mut buf)?;
+            // // skip(&mut buf, 1)?;
+            // let _password = get_string(&mut buf)?;
+            // let _map_seed = get_u64(&mut buf)?;
+            // let _dimension = get_i8(&mut buf)?;
 
             let entity_id = get_id();
             // let seed = 1111423422i64;
             let seed: i64 = 9065250152070435348;
             // let seed: i64 = -4264101711260417039;
             let dimension = 0i8; // -1 hell
+            
+            let mut login_response = packet::LoginResponsePacket {
+                entity_id,
+                _unused1: String::new(),
+                _unused2: String::new(),
+                map_seed: seed,
+                dimension: 0,
+            };
+            
+            // let mut packet = vec![1];
+            // packet.extend_from_slice(&entity_id.to_be_bytes());
 
-            let mut packet = vec![1];
-            packet.extend_from_slice(&entity_id.to_be_bytes());
+            // packet.extend_from_slice(&[0, 0, 0, 0]);
+            // #[rustfmt::skip]
+            // // packet.extend_from_slice(&[0, 0,0, 0, 0,0, 0]);
+            // packet.extend_from_slice(&seed.to_be_bytes());
+            // // packet.extend_from_slice(&[0 ]);
+            // packet.extend_from_slice(&dimension.to_be_bytes());
 
-            packet.extend_from_slice(&[0, 0, 0, 0]);
-            #[rustfmt::skip]
-            // packet.extend_from_slice(&[0, 0,0, 0, 0,0, 0]);
-            packet.extend_from_slice(&seed.to_be_bytes());
-            // packet.extend_from_slice(&[0 ]);
-            packet.extend_from_slice(&dimension.to_be_bytes());
-
-            stream.write_all(&packet).await.unwrap();
+            stream.write_all(&login_response.serialize()?).await.unwrap();
             stream.flush().await.unwrap();
 
             println!("protocol_version {protocol_version}");

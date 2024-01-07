@@ -195,7 +195,7 @@ impl PacketDeserializer {
 }
 
 pub trait Serialize: Sized {
-    fn serialize(&mut self) -> Result<Vec<u8>, PacketError>;
+    fn serialize(&self) -> Result<Vec<u8>, PacketError>;
 }
 
 pub trait Deserialize: Sized {

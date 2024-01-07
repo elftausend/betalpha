@@ -44,7 +44,7 @@ fn implement_serialize_trait(ast: &DeriveInput) -> TokenStream {
 
         let gen = quote! {
             impl crate::packet::parse::Serialize for #name {
-                fn serialize(&mut self) -> Result<Vec<u8>, PacketError> {
+                fn serialize(&self) -> Result<Vec<u8>, PacketError> {
                     let mut serializer = PacketSerializer::default();
                     #body
                     Ok(serializer.output)
