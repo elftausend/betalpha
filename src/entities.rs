@@ -2,9 +2,9 @@ use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::PositionAndLook;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Type {
-    Player,
+    Player(String),
 }
 
 pub async fn spawned_named_entity(

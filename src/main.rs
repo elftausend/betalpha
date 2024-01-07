@@ -215,30 +215,34 @@ async fn main() {
         })
         .collect::<Vec<_>>();
     let chunks = &*Box::leak(chunks.into_boxed_slice());
-    let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook)>(256);
+    let (pos_and_look_tx, mut pos_and_look_rx) = mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
 
     let (pos_and_look_update_tx, mut pos_and_look_update_rx) = broadcast::channel(256);
 
+    // several maps - avoid cloning of username (remove username from state -> username lookup ?)
     let mut entity_positions = std::collections::HashMap::new();
-    // let mut entity
+    let mut entity_username = std::collections::HashMap::new();
 
     let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
     tokio::spawn(async move {
         loop {
-            if let Some((eid, pos_and_look)) = pos_and_look_rx.recv().await {
+            if let Some((eid, pos_and_look, username)) = pos_and_look_rx.recv().await {
                 let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
+                if let Some(username) = username {
+                    entity_username.insert(eid, username);
+                }
 
-                // if a player logs in, not moving entities should be sent
+                // if a player logs in (prev pos is none), not moving entities should be sent
                 if prev_pos_and_look.is_none() {
                     for (eid, pos_and_look) in &entity_positions {
                         pos_and_look_update_tx_inner
-                            .send((*eid, entities::Type::Player, *pos_and_look, None))
+                            .send((*eid, entities::Type::Player(entity_username[eid].clone()), *pos_and_look, None))
                             .unwrap();
                     }
                 }
 
                 pos_and_look_update_tx_inner
-                    .send((eid, entities::Type::Player, pos_and_look, prev_pos_and_look))
+                    .send((eid, entities::Type::Player(entity_username[&eid].clone()), pos_and_look, prev_pos_and_look))
                     .unwrap();
             }
         }
@@ -261,7 +265,7 @@ async fn main() {
 }
 
 pub struct Channels {
-    tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook)>,
+    tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
     rx_entity_movement: broadcast::Receiver<(
         i32,
         entities::Type,
@@ -343,7 +347,7 @@ async fn parse_packet(
     buf: &BytesMut,
     chunks: &[Chunk],
     state: &RwLock<State>,
-    entity_tx: &Sender<(i32, PositionAndLook)>,
+    entity_tx: &Sender<(i32, PositionAndLook, Option<String>)>,
     logged_in: &AtomicBool,
 ) -> Result<usize, Error> {
     let mut buf = Cursor::new(&buf[..]);
@@ -441,10 +445,10 @@ async fn parse_packet(
                 state.position_and_look.z = z;
                 state.position_and_look.yaw = yaw;
                 state.position_and_look.pitch = pitch;
-                outer_state = (state.entity_id, state.position_and_look);
+                outer_state = (state.entity_id, state.position_and_look, Some(state.username.clone()));
             }
             entity_tx
-                .send((outer_state.0, outer_state.1))
+                .send((outer_state.0, outer_state.1, outer_state.2))
                 .await
                 .unwrap();
 
@@ -498,7 +502,7 @@ async fn parse_packet(
                 outer_state = (state.entity_id, state.position_and_look);
             }
             entity_tx
-                .send((outer_state.0, outer_state.1))
+                .send((outer_state.0, outer_state.1, None))
                 .await
                 .unwrap();
             // println!("{x} {y} {stance} {z} {on_ground}");
@@ -517,7 +521,7 @@ async fn parse_packet(
                 outer_state = (state.entity_id, state.position_and_look);
             }
             entity_tx
-                .send((outer_state.0, outer_state.1))
+                .send((outer_state.0, outer_state.1, None))
                 .await
                 .unwrap();
             // println!("{yaw} {pitch} {on_ground}");
@@ -542,7 +546,7 @@ async fn parse_packet(
                 outer_state = (state.entity_id, state.position_and_look);
             }
             entity_tx
-                .send((outer_state.0, outer_state.1))
+                .send((outer_state.0, outer_state.1, None))
                 .await
                 .unwrap();
 
@@ -626,8 +630,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
                 let mut pos_update_stream = pos_update_stream.write().await;
 
                 match ty {
-                    entities::Type::Player => {
-                        spawned_named_entity(&mut pos_update_stream, eid, "Stefan", &now).await
+                    entities::Type::Player(name) => {
+                        spawned_named_entity(&mut pos_update_stream, eid, &name, &now).await
                     }
                 };
 
