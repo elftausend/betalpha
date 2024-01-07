@@ -14,52 +14,52 @@ impl PacketSerializer {
     }
 
     pub fn serialize_u8(&mut self, v: u8) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_u16(&mut self, v: u16) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_u32(&mut self, v: u32) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_u64(&mut self, v: u64) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_f32(&mut self, v: f32) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_f64(&mut self, v: f64) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_i8(&mut self, v: i8) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_i16(&mut self, v: i16) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_i32(&mut self, v: i32) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
     pub fn serialize_i64(&mut self, v: i64) -> Result<(), PacketError> {
-        self.output.append(&mut v.to_be_bytes().to_vec());
+        self.output.extend_from_slice(&v.to_be_bytes());
         Ok(())
     }
 
