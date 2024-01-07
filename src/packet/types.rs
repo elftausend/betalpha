@@ -39,7 +39,7 @@ mod to_client_packets {
     #[derive(Debug, Clone, Deserialize)]
     pub struct PlayerInventoryPacket {
         pub inventory_type: i32,
-        pub count: u16,
+        pub count: i16,
         pub payload: Vec<u8>,
     }
     #[serialize(0x06)]
@@ -339,13 +339,7 @@ pub mod to_server_packets {
     pub struct ChatMessagePacket {
         pub message: String,
     }
-    #[serialize(0x05)]
-    #[derive(Debug, Clone, Deserialize)]
-    pub struct PlayerInventoryPacket {
-        pub inventory_type: i32,
-        pub count: u16,
-        pub payload: Vec<u8>,
-    }
+
     #[serialize(0x07)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct UseEntityPacket {

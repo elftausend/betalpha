@@ -331,27 +331,35 @@ pub async fn keep_alive(
     Ok(())
 }
 
-pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> tokio::io::Result<()> {
-    let mut pre_chunk = vec![0x32];
-    pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
-    pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
-    pre_chunk.extend_from_slice(&[1u8]);
+pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), PacketError> {
+    packet::PreChunkPacket {
+        x: chunk.chunk_x,
+        z: chunk.chunk_z,
+        mode: true,
+    }
+    .send(stream)
+    .await?;
 
-    stream.write_all(&pre_chunk).await?;
-    stream.flush().await?;
+    // let mut pre_chunk = vec![0x32];
+    // pre_chunk.extend_from_slice(&chunk.chunk_x.to_be_bytes());
+    // pre_chunk.extend_from_slice(&chunk.chunk_z.to_be_bytes());
+    // pre_chunk.extend_from_slice(&[1u8]);
 
-    let mut map_chunk = vec![0x33];
+    // stream.write_all(&pre_chunk).await?;
+    // stream.flush().await?;
+
+    // let mut map_chunk = vec![0x33];
     let x = chunk.chunk_x * 16;
     let y = 0i16;
     let z = chunk.chunk_z * 16;
 
-    map_chunk.extend_from_slice(&x.to_be_bytes());
-    map_chunk.extend_from_slice(&y.to_be_bytes());
-    map_chunk.extend_from_slice(&z.to_be_bytes());
+    // map_chunk.extend_from_slice(&x.to_be_bytes());
+    // map_chunk.extend_from_slice(&y.to_be_bytes());
+    // map_chunk.extend_from_slice(&z.to_be_bytes());
 
-    map_chunk.extend_from_slice(&15u8.to_be_bytes());
-    map_chunk.extend_from_slice(&127u8.to_be_bytes());
-    map_chunk.extend_from_slice(&15u8.to_be_bytes());
+    // map_chunk.extend_from_slice(&15u8.to_be_bytes());
+    // map_chunk.extend_from_slice(&127u8.to_be_bytes());
+    // map_chunk.extend_from_slice(&15u8.to_be_bytes());
 
     let mut to_compress = chunk.blocks.clone();
     to_compress.extend_from_slice(&chunk.data);
@@ -368,12 +376,25 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> tokio::io::Res
             to_compress.len() as u64,
         );
 
-        map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
-        map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
+        packet::MapChunkPacket {
+            x,
+            y,
+            z,
+            size_x: 15,
+            size_y: 127,
+            size_z: 15,
+            compressed_size: len as i32,
+            compressed_data: compressed_bytes[..len as usize].to_vec()
+        }
+        .send(stream)
+        .await?;
+        // map_chunk.extend_from_slice(&(len as i32).to_be_bytes());
+        // map_chunk.extend_from_slice(&compressed_bytes[..len as usize]);
     }
 
-    stream.write_all(&map_chunk).await?;
-    stream.flush().await
+    // stream.write_all(&map_chunk).await.unwrap();
+    // stream.flush().await.unwrap();
+    Ok(())
 }
 fn get_id() -> i32 {
     static COUNTER: AtomicI32 = AtomicI32::new(1);
@@ -423,6 +444,7 @@ async fn parse_packet(
                 map_seed: seed,
                 dimension,
             };
+            login_response.send(stream).await?;
 
             // let mut packet = vec![1];
             // packet.extend_from_slice(&entity_id.to_be_bytes());
@@ -433,12 +455,6 @@ async fn parse_packet(
             // packet.extend_from_slice(&seed.to_be_bytes());
             // // packet.extend_from_slice(&[0 ]);
             // packet.extend_from_slice(&dimension.to_be_bytes());
-
-            stream
-                .write_all(&login_response.serialize()?)
-                .await
-                .unwrap();
-            stream.flush().await.unwrap();
 
             println!("protocol_version {protocol_version}");
             println!("username {username}");
@@ -454,30 +470,24 @@ async fn parse_packet(
             }
             println!("sent map");
 
-            // -56.277393,65.62,70.65869
-            let x = -56i32;
-            let y = 80i32;
-            let z = 70i32;
-            let mut spawn_position = vec![0x06];
-            spawn_position.extend_from_slice(&x.to_be_bytes());
-            spawn_position.extend_from_slice(&y.to_be_bytes());
-            spawn_position.extend_from_slice(&z.to_be_bytes());
-
-            stream.write_all(&spawn_position).await.unwrap();
-            stream.flush().await.unwrap();
+            packet::SpawnPositionPacket {
+                x: -56i32,
+                y: 80i32,
+                z: 70i32,
+            }
+            .send(stream)
+            .await?;
 
             println!("sent spawn");
 
             for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
-                let mut player_inventory = vec![0x05];
-                player_inventory.extend_from_slice(&id.to_be_bytes());
-                player_inventory.extend_from_slice(&count.to_be_bytes());
-                for _ in 0..count {
-                    player_inventory.extend_from_slice(&(-1i16).to_be_bytes());
+                packet::PlayerInventoryPacket {
+                    inventory_type: id,
+                    count,
+                    payload: vec![(-1i16).to_be_bytes(); count as usize].concat(),
                 }
-
-                stream.write_all(&player_inventory).await.unwrap();
-                stream.flush().await.unwrap();
+                .send(stream)
+                .await?;
             }
 
             println!("sent inv");
