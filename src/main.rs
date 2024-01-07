@@ -25,8 +25,8 @@ use tokio::{
 
 mod packet;
 
-use crate::packet::{util::*, Deserialize, Serialize};
 use crate::packet::PacketError;
+use crate::packet::{util::*, Deserialize, Serialize};
 
 // mod byte_man;
 // pub use byte_man::*;
@@ -415,15 +415,15 @@ async fn parse_packet(
             let seed: i64 = 9065250152070435348;
             // let seed: i64 = -4264101711260417039;
             let dimension = 0i8; // -1 hell
-            
-            let mut login_response = packet::LoginResponsePacket {
+
+            let login_response = packet::LoginResponsePacket {
                 entity_id,
                 _unused1: String::new(),
                 _unused2: String::new(),
                 map_seed: seed,
-                dimension: 0,
+                dimension,
             };
-            
+
             // let mut packet = vec![1];
             // packet.extend_from_slice(&entity_id.to_be_bytes());
 
@@ -434,7 +434,10 @@ async fn parse_packet(
             // // packet.extend_from_slice(&[0 ]);
             // packet.extend_from_slice(&dimension.to_be_bytes());
 
-            stream.write_all(&login_response.serialize()?).await.unwrap();
+            stream
+                .write_all(&login_response.serialize()?)
+                .await
+                .unwrap();
             stream.flush().await.unwrap();
 
             println!("protocol_version {protocol_version}");

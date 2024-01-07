@@ -2,9 +2,8 @@ mod parse;
 mod types;
 pub mod util;
 
-pub use types::*;
 pub use parse::*;
-
+pub use types::*;
 
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};

@@ -1,14 +1,15 @@
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens, TokenStreamExt};
-use syn::{DeriveInput, Type};
+use quote::{quote, ToTokens};
+use syn::DeriveInput;
 
-#[proc_macro_derive(Serialize)]
-pub fn derive_serialization(input: TokenStream) -> TokenStream {
+#[proc_macro_attribute]
+pub fn serialize(attr: TokenStream, input: TokenStream) -> TokenStream {
+    let packet_id = syn::parse(attr).unwrap();
     let ast = syn::parse(input).unwrap();
-    implement_serialize_trait(&ast)
+    implement_serialize_trait(&packet_id, &ast)
 }
 
-fn implement_serialize_trait(ast: &DeriveInput) -> TokenStream {
+fn implement_serialize_trait(attr: &syn::Expr, ast: &DeriveInput) -> TokenStream {
     let name = &ast.ident;
 
     if let syn::Data::Struct(data) = &ast.data {
@@ -22,6 +23,9 @@ fn implement_serialize_trait(ast: &DeriveInput) -> TokenStream {
             })
             .collect();
         let mut body = proc_macro2::TokenStream::new();
+        quote!(
+            serializer.serialize_u8(#attr)?;
+        ).to_tokens(&mut body);
         for (ident, ty) in fields {
             let line = match ty.to_string().as_str() {
                 "bool" => quote! {serializer.serialize_bool(self.#ident)?;},
@@ -43,6 +47,8 @@ fn implement_serialize_trait(ast: &DeriveInput) -> TokenStream {
         }
 
         let gen = quote! {
+            #ast
+
             impl crate::packet::parse::Serialize for #name {
                 fn serialize(&self) -> Result<Vec<u8>, PacketError> {
                     let mut serializer = PacketSerializer::default();
@@ -53,14 +59,7 @@ fn implement_serialize_trait(ast: &DeriveInput) -> TokenStream {
         };
         gen.into()
     } else {
-        let gen = quote! {
-            impl crate::packet::parse::Serialize for #name {
-                fn serialize(&mut self) -> Result<Vec<u8>, PacketError> {
-                    panic!("Not a struct.")
-                }
-            }
-        };
-        gen.into()
+        panic!("not a struct")
     }
 }
 
@@ -143,13 +142,6 @@ fn implement_deserialize_trait(ast: &DeriveInput) -> TokenStream {
         };
         gen.into()
     } else {
-        let gen = quote! {
-            impl crate::packet::parse::Deserialize for #name {
-                fn nested_deserialize(cursor: &mut std::io::Cursor<&[u8]>) -> Result<Self, PacketError> {
-                    panic!("Not a struct.")
-                }
-            }
-        };
-        gen.into()
+        panic!("not a struct")
     }
 }
