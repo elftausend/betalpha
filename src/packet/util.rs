@@ -17,7 +17,7 @@ pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, PacketError> {
 }
 
 pub fn get_u16(src: &mut Cursor<&[u8]>) -> Result<u16, PacketError> {
-    if src.remaining() < 4 {
+    if src.remaining() < 2 {
         return Err(PacketError::NotEnoughBytes);
     }
     Ok(src.get_u16())
