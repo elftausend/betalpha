@@ -23,6 +23,7 @@ use tokio::{
     },
 };
 
+mod global_handlers;
 mod packet;
 
 use crate::packet::PacketError;
@@ -56,43 +57,6 @@ fn test_base_conv() {
 }
 
 use crate::entities::spawned_named_entity;
-
-fn test_libz() {
-    // libz_sys::compress(dest, destLen, source, sourceLen)
-    // Original data
-    let _original_data = b"Hello, world!";
-    /*
-    // Initialize the z_stream structure
-    let mut stream = z_stream {
-        next_in: original_data.as_ptr() as *mut _,
-        avail_in: original_data.len() as u32,
-        ..Default::default()
-    };
-
-    // Initialize the deflate stream
-    let mut ret = unsafe { deflateInit_(&mut stream, libz_sys::Z_DEFAULT_COMPRESSION) };
-    assert_eq!(ret, Z_OK);
-
-    // Buffer to hold compressed data
-    let mut compressed_data = vec![0u8; original_data.len() * 2];
-
-    // Set the output buffer
-    stream.next_out = compressed_data.as_mut_ptr() as *mut _;
-    stream.avail_out = compressed_data.len() as u32;
-
-    // Perform the compression
-    ret = unsafe { deflate(&mut stream, libz_sys::Z_FINISH) };
-    assert_eq!(ret, Z_STREAM_END);
-
-    // Clean up the deflate stream
-    ret = unsafe { deflateEnd(&mut stream) };
-    assert_eq!(ret, Z_OK);
-
-    // Resize the compressed_data vector to the actual size
-    compressed_data.resize((stream.next_out as usize - compressed_data.as_ptr() as usize) / std::mem::size_of::<u8>(), 0);
-
-    println!("Compressed data: {:?}", compressed_data);*/
-}
 
 pub struct Chunk {
     chunk_x: i32,
@@ -357,7 +321,7 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
             compressed_bytes.as_mut_ptr(),
             &mut len,
             to_compress.as_ptr(),
-            to_compress.len() as u64,
+            to_compress.len().try_into().unwrap(),
         );
 
         packet::MapChunkPacket {
@@ -650,15 +614,13 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
 
     let Channels {
         tx_player_pos_and_look,
-        mut rx_entity_movement,
+        rx_entity_movement,
         tx_destroy_self_entity,
-        mut rx_destroy_entities,
+        rx_destroy_entities,
     } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
     let keep_alive_stream = stream.clone();
-    let pos_update_stream = stream.clone();
-    let entity_destroy_stream = stream.clone();
 
     let state = Arc::new(RwLock::new(State {
         entity_id: 0,
@@ -675,107 +637,19 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
 
     let logged_in = Arc::new(AtomicBool::new(false));
 
-    let logged_in_inner = logged_in.clone();
-    let state_pos_update = state.clone();
-
     // spawn or update entities
-    tokio::task::spawn(async move {
-        let mut seen_before = HashSet::new();
-        loop {
-            // single core servers
-            if !logged_in_inner.load(Ordering::Relaxed) {
-                continue;
-            }
-            let Ok((eid, ty, now, prev)) = rx_entity_movement.recv().await else {
-                continue;
-            };
-
-            if eid == state_pos_update.read().await.entity_id {
-                continue;
-            }
-
-            // TODO: add eid is in reach check, unload/destroy entity
-            // FIXME: could potentially receive a lot of data / entity information that is intantly discarded
-
-            // println!(
-            //     "i am: {}, moved: {eid} {now:?}, prev: {prev:?}",
-            //     state_pos_update.read().await.entity_id
-            // );
-
-            if !seen_before.contains(&eid) {
-                let mut pos_update_stream = pos_update_stream.write().await;
-
-                match ty {
-                    entities::Type::Player(name) => {
-                        spawned_named_entity(&mut pos_update_stream, eid, &name, &now).await
-                    }
-                };
-
-                let mut entity_spawn = vec![0x1E];
-                entity_spawn.extend_from_slice(&eid.to_be_bytes());
-
-                pos_update_stream.write_all(&entity_spawn).await.unwrap();
-                pos_update_stream.flush().await.unwrap();
-            }
-
-            seen_before.insert(eid);
-
-            if let Some(prev) = prev {
-                // check if travelled blocks is > 4 (teleport)
-
-                let x = ((now.x - prev.x) * 32.).round() as i8;
-                let y = ((now.y - prev.y) * 32.).round() as i8;
-                let z = ((now.z - prev.z) * 32.).round() as i8;
-                let yawf = ((now.yaw / 360.) * 255.) % 255.;
-                let pitch = (((now.pitch / 360.) * 255.) % 255.) as i8;
-
-                let mut yaw = yawf as i8;
-                if yawf < -128. {
-                    yaw = 127 - (yawf + 128.).abs() as i8
-                }
-                if yawf > 128. {
-                    yaw = -128 + (yawf - 128.).abs() as i8
-                }
-
-                // println!("yaw: {yawf} {} pitch: {pitch}", yaw);
-
-                let mut entity_look_and_move = vec![0x21];
-                entity_look_and_move.extend_from_slice(&eid.to_be_bytes());
-                entity_look_and_move.extend_from_slice(&[
-                    x.to_be_bytes()[0],
-                    y.to_be_bytes()[0],
-                    z.to_be_bytes()[0],
-                    yaw.to_be_bytes()[0],
-                    pitch.to_be_bytes()[0],
-                ]);
-
-                let mut pos_update_stream = pos_update_stream.write().await;
-                pos_update_stream
-                    .write_all(&entity_look_and_move)
-                    .await
-                    .unwrap();
-                pos_update_stream.flush().await.unwrap();
-            }
-        }
-    });
+    tokio::task::spawn(global_handlers::spawn_entities(
+        logged_in.clone(),
+        state.clone(),
+        rx_entity_movement,
+        stream.clone(),
+    ));
 
     // destroy entities
-    tokio::task::spawn(async move {
-        loop {
-            if let Ok(eid) = rx_destroy_entities.recv().await {
-                println!("des: {eid}");
-                let mut destroy_entity = vec![0x1D];
-                destroy_entity.extend_from_slice(&eid.to_be_bytes());
-
-                let mut destroy_entity_stream = entity_destroy_stream.write().await;
-                destroy_entity_stream
-                    .write_all(&destroy_entity)
-                    .await
-                    .unwrap();
-                destroy_entity_stream.flush().await.unwrap();
-            }
-        }
-    });
+    tokio::task::spawn(global_handlers::destroy_entities(
+        rx_destroy_entities,
+        stream.clone(),
+    ));
 
     tokio::task::spawn(async move {
         loop {
