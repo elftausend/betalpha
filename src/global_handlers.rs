@@ -6,3 +6,74 @@ pub use destroy_entities::*;
 
 mod animations;
 pub use animations::*;
+
+use tokio::sync::{broadcast, mpsc};
+
+use crate::{entities, PositionAndLook};
+use std::collections::HashMap;
+
+pub struct CollectionCenter {
+    pub rx_pos_and_look: mpsc::Receiver<(i32, PositionAndLook, Option<String>)>,
+    pub tx_pos_and_look_update: broadcast::Sender<(
+        i32,
+        entities::Type,
+        PositionAndLook,
+        Option<PositionAndLook>,
+    )>,
+    pub rx_entity_destroy: mpsc::Receiver<i32>,
+    pub tx_destroy_entities: broadcast::Sender<i32>,
+}
+
+pub async fn collection_center(
+    mut entity_username: HashMap<i32, String>,
+    mut entity_positions: HashMap<i32, PositionAndLook>,
+    collection_center: CollectionCenter,
+) {
+    let CollectionCenter {
+        mut rx_pos_and_look,
+        tx_pos_and_look_update,
+        mut rx_entity_destroy,
+        tx_destroy_entities,
+    } = collection_center;
+
+    loop {
+        // receive position updates, log in (username)
+        if let Ok((eid, pos_and_look, username)) = rx_pos_and_look.try_recv() {
+            let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
+            if let Some(username) = username {
+                entity_username.insert(eid, username);
+            }
+
+            // if a player logs in (prev pos is none), not moving entities should be sent
+            if prev_pos_and_look.is_none() {
+                for (eid, pos_and_look) in &entity_positions {
+                    tx_pos_and_look_update
+                        .send((
+                            *eid,
+                            entities::Type::Player(entity_username[eid].clone()),
+                            *pos_and_look,
+                            None,
+                        ))
+                        .unwrap();
+                }
+            }
+
+            tx_pos_and_look_update
+                .send((
+                    eid,
+                    entities::Type::Player(entity_username[&eid].clone()),
+                    pos_and_look,
+                    prev_pos_and_look,
+                ))
+                .unwrap();
+        }
+
+        if let Ok(eid) = rx_entity_destroy.try_recv() {
+            entity_positions.remove(&eid);
+            entity_username.remove(&eid);
+
+            tx_destroy_entities.send(eid).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_secs_f64(0.0001)).await;
+    }
+}

@@ -1,6 +1,10 @@
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
-use crate::{PositionAndLook, packet::{self, util::SendPacket}, utils::look_to_i8_range};
+use crate::{
+    packet::{self, util::SendPacket},
+    utils::look_to_i8_range,
+    PositionAndLook,
+};
 
 #[derive(Debug, Clone)]
 pub enum Type {
@@ -13,7 +17,6 @@ pub async fn spawned_named_entity(
     name: &str,
     pos_and_look: &PositionAndLook,
 ) -> Result<(), packet::PacketError> {
-
     let x = (pos_and_look.x * 32.).round() as i32;
     let y = (pos_and_look.y * 32.).round() as i32;
     let z = (pos_and_look.z * 32.).round() as i32;
@@ -29,5 +32,7 @@ pub async fn spawned_named_entity(
         rotation,
         pitch,
         current_item: 0,
-    }.send(stream).await
+    }
+    .send(stream)
+    .await
 }

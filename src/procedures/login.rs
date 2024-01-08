@@ -1,9 +1,6 @@
 use std::{
     io::Cursor,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use tokio::{
@@ -14,7 +11,8 @@ use tokio::{
 use crate::{
     get_id,
     packet::{self, util::SendPacket, Deserialize, PacketError},
-    send_chunk, Chunk, PositionAndLook, State,
+    world::send_chunk,
+    Chunk, PositionAndLook, State,
 };
 
 pub async fn login(

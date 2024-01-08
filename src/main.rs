@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     future::Future,
     io::Cursor,
     pin::Pin,
@@ -11,9 +10,8 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 
-use nbt::{Blob, Value};
+use global_handlers::{collection_center, CollectionCenter};
 use procedures::login;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -23,34 +21,24 @@ use tokio::{
         RwLock,
     },
 };
+use world::{load_demo::load_entire_world, Chunk};
 
 // if other clients want to interact with this client
 mod global_handlers;
 mod packet;
 mod utils;
+mod world;
 
 // if the server (instantly) reacts to client activity
 mod procedures;
 
-use crate::{packet::PacketError, utils::base36_to_base10};
-use crate::packet::{util::*, Deserialize, Serialize};
+use crate::packet::PacketError;
+use crate::packet::{util::*, Deserialize};
 
 // mod byte_man;
 // pub use byte_man::*;
 
 mod entities;
-
-use crate::entities::spawned_named_entity;
-
-pub struct Chunk {
-    chunk_x: i32,
-    chunk_z: i32,
-    blocks: Vec<u8>,
-    data: Vec<u8>,
-    sky_light: Vec<u8>,
-    block_light: Vec<u8>,
-    height_map: Vec<u8>,
-}
 
 type PacketHandler = Box<
     dyn FnOnce(
@@ -80,154 +68,35 @@ async fn main() {
     // packet_handlers[0x00] = keep_alive;
 
     // let mut chunks = Vec::new();
-    let dirs = walkdir::WalkDir::new("./World2/")
-        // let dirs = walkdir::WalkDir::new("/home/elftausend/.minecraft/saves/World1/")
-        .into_iter()
-        .collect::<Vec<_>>();
 
-    // 1. use rayon, 2. try valence_nbt for maybe improved performance?
-    let chunks = dirs
-        .par_iter()
-        .filter_map(|entry| {
-            let entry = entry.as_ref().unwrap();
-            let useable_filename = entry.path().file_name().unwrap().to_str().unwrap(); // thx rust
-            if !useable_filename.ends_with(".dat") || useable_filename.ends_with("level.dat") {
-                return None;
-            };
-            println!("entry path: {:?}", entry.path());
-            let mut file = std::fs::File::open(entry.path()).unwrap();
-
-            let blob: Blob = nbt::from_gzip_reader(&mut file).unwrap();
-
-            let Some(Value::Compound(level)) = &blob.get("Level") else {
-                println!("INFO: invalid path: {entry:?}");
-                return None;
-            };
-
-            let x = match level.get("xPos").unwrap() {
-                Value::Byte(x) => *x,
-                d => panic!("invalid dtype: {d:?}"),
-            };
-
-            let chunk_x = base36_to_base10(x);
-
-            let z = match level.get("zPos").unwrap() {
-                Value::Byte(x) => *x,
-                d => panic!("invalid dtype {d:?}"),
-            };
-
-            let chunk_z = base36_to_base10(z);
-
-            let Value::ByteArray(blocks) = &level["Blocks"] else {
-                panic!("invalid");
-            };
-            let blocks = blocks
-                .iter()
-                .map(|x| x.to_be_bytes()[0])
-                .collect::<Vec<_>>();
-
-            let Value::ByteArray(data) = &level["Data"] else {
-                panic!("invalid");
-            };
-
-            let data = data.iter().map(|x| x.to_be_bytes()[0]).collect::<Vec<_>>();
-
-            let Value::ByteArray(sky_light) = &level["SkyLight"] else {
-                panic!("invalid");
-            };
-            let sky_light = sky_light
-                .iter()
-                .map(|x| x.to_be_bytes()[0])
-                .collect::<Vec<_>>();
-
-            let Value::ByteArray(block_light) = &level["BlockLight"] else {
-                panic!("invalid");
-            };
-            let block_light = block_light
-                .iter()
-                .map(|x| x.to_be_bytes()[0])
-                .collect::<Vec<_>>();
-
-            let Value::ByteArray(height_map) = &level["HeightMap"] else {
-                panic!("invalid");
-            };
-            let height_map = height_map
-                .iter()
-                .map(|x| x.to_be_bytes()[0])
-                .collect::<Vec<_>>();
-
-            Some(Chunk {
-                chunk_x,
-                chunk_z,
-                blocks,
-                data,
-                sky_light,
-                block_light,
-                height_map,
-            })
-        })
-        .collect::<Vec<_>>();
+    let chunks = load_entire_world("./World2/");
     let chunks = &*Box::leak(chunks.into_boxed_slice());
-    let (pos_and_look_tx, mut pos_and_look_rx) =
+    let (tx_pos_and_look, rx_pos_and_look) =
         mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
 
-    let (pos_and_look_update_tx, _pos_and_look_update_rx) = broadcast::channel(256);
-    let (tx_destroy_self_entity, mut rx_entity_destroy) = mpsc::channel::<i32>(100);
+    let (tx_pos_and_look_update, _pos_and_look_update_rx) = broadcast::channel(256);
+    let (tx_destroy_self_entity, rx_entity_destroy) = mpsc::channel::<i32>(100);
     let (tx_destroy_entities, _) = broadcast::channel(256);
 
     // several maps - avoid cloning of username (remove username from state -> username lookup ?)
-    let mut entity_positions = std::collections::HashMap::new();
-    let mut entity_username = std::collections::HashMap::new();
+    let entity_positions = std::collections::HashMap::new();
+    let entity_username = std::collections::HashMap::new();
 
-    let pos_and_look_update_tx_inner = pos_and_look_update_tx.clone();
-    let tx_destroy_entities_inner = tx_destroy_entities.clone();
-    tokio::spawn(async move {
-        loop {
-            // receive position updates, log in (username)
-            if let Ok((eid, pos_and_look, username)) = pos_and_look_rx.try_recv() {
-                let prev_pos_and_look = entity_positions.insert(eid, pos_and_look);
-                if let Some(username) = username {
-                    entity_username.insert(eid, username);
-                }
-
-                // if a player logs in (prev pos is none), not moving entities should be sent
-                if prev_pos_and_look.is_none() {
-                    for (eid, pos_and_look) in &entity_positions {
-                        pos_and_look_update_tx_inner
-                            .send((
-                                *eid,
-                                entities::Type::Player(entity_username[eid].clone()),
-                                *pos_and_look,
-                                None,
-                            ))
-                            .unwrap();
-                    }
-                }
-
-                pos_and_look_update_tx_inner
-                    .send((
-                        eid,
-                        entities::Type::Player(entity_username[&eid].clone()),
-                        pos_and_look,
-                        prev_pos_and_look,
-                    ))
-                    .unwrap();
-            }
-
-            if let Ok(eid) = rx_entity_destroy.try_recv() {
-                entity_positions.remove(&eid);
-                entity_username.remove(&eid);
-
-                tx_destroy_entities_inner.send(eid).unwrap();
-            }
-            tokio::time::sleep(std::time::Duration::from_secs_f64(0.0001)).await;
-        }
-    });
+    tokio::spawn(collection_center(
+        entity_username,
+        entity_positions,
+        CollectionCenter {
+            rx_pos_and_look,
+            tx_pos_and_look_update: tx_pos_and_look_update.clone(),
+            rx_entity_destroy,
+            tx_destroy_entities: tx_destroy_entities.clone(),
+        },
+    ));
 
     loop {
         let mut channels = Channels {
-            tx_player_pos_and_look: pos_and_look_tx.clone(),
-            rx_entity_movement: pos_and_look_update_tx.clone().subscribe(),
+            tx_player_pos_and_look: tx_pos_and_look.clone(),
+            rx_entity_movement: tx_pos_and_look_update.clone().subscribe(),
             tx_destroy_self_entity: tx_destroy_self_entity.clone(),
             rx_destroy_entities: tx_destroy_entities.clone().subscribe(),
         };
@@ -279,51 +148,6 @@ pub async fn keep_alive(
     Ok(())
 }
 
-pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), PacketError> {
-    packet::PreChunkPacket {
-        x: chunk.chunk_x,
-        z: chunk.chunk_z,
-        mode: true,
-    }
-    .send(stream)
-    .await?;
-
-    // let mut map_chunk = vec![0x33];
-    let x = chunk.chunk_x * 16;
-    let y = 0i16;
-    let z = chunk.chunk_z * 16;
-
-    let mut to_compress = chunk.blocks.clone();
-    to_compress.extend_from_slice(&chunk.data);
-    to_compress.extend_from_slice(&chunk.block_light);
-    to_compress.extend_from_slice(&chunk.sky_light);
-
-    unsafe {
-        let mut len = libz_sys::compressBound(to_compress.len() as u64);
-        let mut compressed_bytes = vec![0u8; len as usize];
-        libz_sys::compress(
-            compressed_bytes.as_mut_ptr(),
-            &mut len,
-            to_compress.as_ptr(),
-            to_compress.len().try_into().unwrap(),
-        );
-
-        packet::MapChunkPacket {
-            x,
-            y,
-            z,
-            size_x: 15,
-            size_y: 127,
-            size_z: 15,
-            compressed_size: len as i32,
-            compressed_data: compressed_bytes[..len as usize].to_vec(),
-        }
-        .send(stream)
-        .await?;
-    }
-
-    Ok(())
-}
 fn get_id() -> i32 {
     static COUNTER: AtomicI32 = AtomicI32::new(1);
     COUNTER.fetch_add(1, Ordering::Relaxed)
