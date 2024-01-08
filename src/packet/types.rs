@@ -59,7 +59,7 @@ mod to_client_packets {
     pub struct RespawnPacket;
     #[serialize(0x0D)]
     #[derive(Debug, Clone, Deserialize)]
-    pub struct PlayerPositionLookPacket {
+    pub struct ServerPositionLookPacket {
         pub x: f64,
         pub stance: f64,
         pub y: f64,

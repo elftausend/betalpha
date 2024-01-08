@@ -370,13 +370,6 @@ async fn parse_packet(
                 let login_request = packet::LoginRequestPacket::nested_deserialize(&mut buf)?;
                 let protocol_version = login_request.protocol_version;
                 let username = login_request.username;
-                // let protocol_version = get_i32(&mut buf)?;
-                // // skip(&mut buf, 1)?;
-                // let username = get_string(&mut buf)?;
-                // // skip(&mut buf, 1)?;
-                // let _password = get_string(&mut buf)?;
-                // let _map_seed = get_u64(&mut buf)?;
-                // let _dimension = get_i8(&mut buf)?;
 
                 let entity_id = get_id();
                 // let seed = 1111423422i64;
@@ -392,16 +385,6 @@ async fn parse_packet(
                     dimension,
                 };
                 login_response.send(stream).await?;
-
-                // let mut packet = vec![1];
-                // packet.extend_from_slice(&entity_id.to_be_bytes());
-
-                // packet.extend_from_slice(&[0, 0, 0, 0]);
-                // #[rustfmt::skip]
-                // // packet.extend_from_slice(&[0, 0,0, 0, 0,0, 0]);
-                // packet.extend_from_slice(&seed.to_be_bytes());
-                // // packet.extend_from_slice(&[0 ]);
-                // packet.extend_from_slice(&dimension.to_be_bytes());
 
                 println!("protocol_version {protocol_version}");
                 println!("username {username}");
@@ -468,19 +451,18 @@ async fn parse_packet(
 
                 let on_ground = true;
 
-                let mut position_look = vec![0x0D];
-                position_look.extend_from_slice(&x.to_be_bytes());
-                // mind stance order
-                position_look.extend_from_slice(&stance.to_be_bytes());
-                position_look.extend_from_slice(&y.to_be_bytes());
-                position_look.extend_from_slice(&z.to_be_bytes());
+                packet::ServerPositionLookPacket {
+                    x,
+                    stance,
+                    y,
+                    z,
+                    yaw,
+                    pitch,
+                    on_ground,
+                }
+                .send(stream)
+                .await?;
 
-                position_look.extend_from_slice(&yaw.to_be_bytes());
-                position_look.extend_from_slice(&pitch.to_be_bytes());
-                position_look.extend_from_slice(&[on_ground as u8]);
-
-                stream.write_all(&position_look).await.unwrap();
-                stream.flush().await.unwrap();
                 println!("sent pos");
 
                 state.write().await.logged_in = true;
@@ -504,6 +486,7 @@ async fn parse_packet(
             }
 
             0x0B => {
+                packet::PlayerPositionPacket::nested_deserialize(&mut buf)?;
                 let x = get_f64(&mut buf)?;
                 let y = get_f64(&mut buf)?;
                 let _stance = get_f64(&mut buf)?;
