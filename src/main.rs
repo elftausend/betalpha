@@ -486,17 +486,19 @@ async fn parse_packet(
             }
 
             0x0B => {
-                packet::PlayerPositionPacket::nested_deserialize(&mut buf)?;
-                let x = get_f64(&mut buf)?;
-                let y = get_f64(&mut buf)?;
-                let _stance = get_f64(&mut buf)?;
-                let z = get_f64(&mut buf)?;
-                let _on_ground = get_u8(&mut buf)? != 0;
+                let packet::PlayerPositionPacket {
+                    x,
+                    y,
+                    stance,
+                    z,
+                    on_ground,
+                } = packet::PlayerPositionPacket::nested_deserialize(&mut buf)?;
 
                 let outer_state;
                 {
                     let mut state = state.write().await;
-
+                    state.stance = stance;
+                    state.on_ground = on_ground;
                     state.position_and_look.x = x;
                     state.position_and_look.y = y;
                     state.position_and_look.z = z;
@@ -512,13 +514,16 @@ async fn parse_packet(
             0x0C => {
                 let yaw = get_f32(&mut buf)?;
                 let pitch = get_f32(&mut buf)?;
-                let _on_ground = get_u8(&mut buf)? != 0;
+                let on_ground = get_u8(&mut buf)? != 0;
 
                 let outer_state;
                 {
                     let mut state = state.write().await;
                     state.position_and_look.yaw = yaw;
                     state.position_and_look.pitch = pitch;
+
+                    state.on_ground = on_ground;
+
                     outer_state = (state.entity_id, state.position_and_look);
                 }
                 entity_tx
@@ -529,13 +534,16 @@ async fn parse_packet(
             }
 
             0x0D => {
-                let x = get_f64(&mut buf)?;
-                let y = get_f64(&mut buf)?;
-                let _stance = get_f64(&mut buf)?;
-                let z = get_f64(&mut buf)?;
-                let yaw = get_f32(&mut buf)?;
-                let pitch = get_f32(&mut buf)?;
-                let _on_ground = get_u8(&mut buf)? != 0;
+                let packet::PlayerPositionLookPacket {
+                    x,
+                    y,
+                    stance,
+                    z,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } = packet::PlayerPositionLookPacket::nested_deserialize(&mut buf)?;
+
                 let outer_state;
                 {
                     let mut state = state.write().await;
@@ -544,6 +552,10 @@ async fn parse_packet(
                     state.position_and_look.z = z;
                     state.position_and_look.yaw = yaw;
                     state.position_and_look.pitch = pitch;
+
+                    state.on_ground = on_ground;
+                    state.stance = stance;
+
                     outer_state = (state.entity_id, state.position_and_look);
                 }
                 entity_tx
@@ -580,6 +592,8 @@ pub struct State {
     entity_id: i32,
     username: String,
     logged_in: bool,
+    stance: f64,
+    on_ground: bool,
     position_and_look: PositionAndLook,
 }
 
@@ -609,6 +623,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         entity_id: 0,
         username: "".to_string(),
         logged_in: false,
+        stance: 0.,
+        on_ground: true,
         position_and_look: PositionAndLook {
             x: 0.,
             y: 0.,
@@ -633,6 +649,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         rx_destroy_entities,
         stream.clone(),
     ));
+
+    // tokio::task::spawn(global_handlers::animations(logged_in.clone(), rx_animations, stream));
 
     tokio::task::spawn(async move {
         loop {
