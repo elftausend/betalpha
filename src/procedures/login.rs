@@ -6,12 +6,15 @@ use std::{
     },
 };
 
-use tokio::{net::TcpStream, sync::{RwLock, mpsc}};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, RwLock},
+};
 
 use crate::{
     get_id,
     packet::{self, util::SendPacket, Deserialize, PacketError},
-    send_chunk, Chunk, State, PositionAndLook,
+    send_chunk, Chunk, PositionAndLook, State,
 };
 
 pub async fn login(
@@ -20,7 +23,7 @@ pub async fn login(
     spawn_chunks: &[Chunk],
     logged_in: &AtomicBool,
     state: &RwLock<State>,
-    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>
+    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
 ) -> Result<(), PacketError> {
     let login_request = packet::LoginRequestPacket::nested_deserialize(buf)?;
     let protocol_version = login_request.protocol_version;

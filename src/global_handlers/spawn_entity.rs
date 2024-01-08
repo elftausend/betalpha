@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::{
     entities::{self, spawned_named_entity, Type},
-    PositionAndLook, State,
+    PositionAndLook, State, utils::look_to_i8_range,
 };
 
 pub async fn spawn_entities(
@@ -55,7 +55,7 @@ pub async fn spawn_entities(
 
             match ty {
                 entities::Type::Player(name) => {
-                    spawned_named_entity(&mut pos_update_stream, eid, &name, &now).await
+                    spawned_named_entity(&mut pos_update_stream, eid, &name, &now).await.unwrap()
                 }
             };
 
@@ -74,16 +74,9 @@ pub async fn spawn_entities(
             let x = ((now.x - prev.x) * 32.).round() as i8;
             let y = ((now.y - prev.y) * 32.).round() as i8;
             let z = ((now.z - prev.z) * 32.).round() as i8;
-            let yawf = ((now.yaw / 360.) * 255.) % 255.;
-            let pitch = (((now.pitch / 360.) * 255.) % 255.) as i8;
 
-            let mut yaw = yawf as i8;
-            if yawf < -128. {
-                yaw = 127 - (yawf + 128.).abs() as i8
-            }
-            if yawf > 128. {
-                yaw = -128 + (yawf - 128.).abs() as i8
-            }
+            let (yaw, pitch) = look_to_i8_range(now.yaw, now.pitch);
+            
 
             // println!("yaw: {yawf} {} pitch: {pitch}", yaw);
 

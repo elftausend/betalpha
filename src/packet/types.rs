@@ -90,7 +90,7 @@ mod to_client_packets {
     #[serialize(0x14)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct NamedEntitySpawnPacket {
-        pub entity_id: u32,
+        pub entity_id: i32,
         pub name: String,
         pub x: i32,
         pub y: i32,
@@ -149,7 +149,7 @@ mod to_client_packets {
     #[serialize(0x1D)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct DestroyEntityPacket {
-        pub entity_id: u32,
+        pub entity_id: i32,
     }
     #[serialize(0x1E)]
     #[derive(Debug, Clone, Deserialize)]

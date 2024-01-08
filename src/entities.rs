@@ -1,6 +1,6 @@
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
-use crate::PositionAndLook;
+use crate::{PositionAndLook, packet::{self, util::SendPacket}, utils::look_to_i8_range};
 
 #[derive(Debug, Clone)]
 pub enum Type {
@@ -12,21 +12,22 @@ pub async fn spawned_named_entity(
     eid: i32,
     name: &str,
     pos_and_look: &PositionAndLook,
-) {
-    let mut named_entity_spawn = vec![0x14];
-    named_entity_spawn.extend_from_slice(&eid.to_be_bytes());
+) -> Result<(), packet::PacketError> {
 
-    named_entity_spawn.extend_from_slice(&(name.len() as i16).to_be_bytes());
-    named_entity_spawn.extend_from_slice(name.as_bytes());
     let x = (pos_and_look.x * 32.).round() as i32;
     let y = (pos_and_look.y * 32.).round() as i32;
     let z = (pos_and_look.z * 32.).round() as i32;
 
-    named_entity_spawn.extend_from_slice(&x.to_be_bytes());
-    named_entity_spawn.extend_from_slice(&y.to_be_bytes());
-    named_entity_spawn.extend_from_slice(&z.to_be_bytes());
-    named_entity_spawn.extend_from_slice(&[0, 0, 0, 0]);
+    let (rotation, pitch) = look_to_i8_range(pos_and_look.yaw, pos_and_look.pitch);
 
-    stream.write_all(&named_entity_spawn).await.unwrap();
-    stream.flush().await.unwrap();
+    packet::NamedEntitySpawnPacket {
+        entity_id: eid,
+        name: name.to_string(),
+        x,
+        y,
+        z,
+        rotation,
+        pitch,
+        current_item: 0,
+    }.send(stream).await
 }

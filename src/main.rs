@@ -27,39 +27,18 @@ use tokio::{
 // if other clients want to interact with this client
 mod global_handlers;
 mod packet;
+mod utils;
 
 // if the server (instantly) reacts to client activity
 mod procedures;
 
-use crate::packet::PacketError;
+use crate::{packet::PacketError, utils::base36_to_base10};
 use crate::packet::{util::*, Deserialize, Serialize};
 
 // mod byte_man;
 // pub use byte_man::*;
 
 mod entities;
-
-fn base36_to_base10(input: i8) -> i32 {
-    let mut result = 0;
-    let mut base = 1;
-    let mut num = input.abs() as i32;
-
-    while num > 0 {
-        let digit = num % 10;
-        result += digit * base;
-        num /= 10;
-        base *= 36;
-    }
-
-    result * if input.is_negative() { -1 } else { 1 }
-}
-
-#[test]
-fn test_base_conv() {
-    assert_eq!(base36_to_base10(18), 44);
-    println!("base: {}", base36_to_base10(-127));
-    println!("{}", (12 << 4));
-}
 
 use crate::entities::spawned_named_entity;
 

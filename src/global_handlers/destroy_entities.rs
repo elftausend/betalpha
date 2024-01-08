@@ -1,26 +1,22 @@
 use std::sync::Arc;
 
 use tokio::{
-    io::AsyncWriteExt,
     net::TcpStream,
     sync::{broadcast, RwLock},
 };
+
+use crate::packet::{self, util::SendPacket};
 
 pub async fn destroy_entities(
     mut rx_destroy_entities: broadcast::Receiver<i32>,
     entity_destroy_stream: Arc<RwLock<TcpStream>>,
 ) {
     loop {
-        if let Ok(eid) = rx_destroy_entities.recv().await {
-            let mut destroy_entity = vec![0x1D];
-            destroy_entity.extend_from_slice(&eid.to_be_bytes());
-
-            let mut destroy_entity_stream = entity_destroy_stream.write().await;
-            destroy_entity_stream
-                .write_all(&destroy_entity)
+        if let Ok(entity_id) = rx_destroy_entities.recv().await {
+            packet::DestroyEntityPacket { entity_id }
+                .send(&mut *entity_destroy_stream.write().await)
                 .await
-                .unwrap();
-            destroy_entity_stream.flush().await.unwrap();
+                .unwrap_or_default();
         }
     }
 }
