@@ -12,6 +12,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 
 use nbt::{Blob, Value};
+use procedures::login;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -23,8 +24,12 @@ use tokio::{
     },
 };
 
+// if other clients want to interact with this client
 mod global_handlers;
 mod packet;
+
+// if the server (instantly) reacts to client activity
+mod procedures;
 
 use crate::packet::PacketError;
 use crate::packet::{util::*, Deserialize, Serialize};
@@ -345,13 +350,14 @@ fn get_id() -> i32 {
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-// add checking with peak (faster)
+// TODO: add checking with peak (faster) [I won't do it]
+// TODO: use Arc rwlock
 async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
     chunks: &[Chunk],
     state: &RwLock<State>,
-    entity_tx: &Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &Sender<(i32, PositionAndLook, Option<String>)>,
     tx_disconnect: &Sender<i32>,
     logged_in: &AtomicBool,
 ) -> Result<usize, PacketError> {
@@ -366,107 +372,7 @@ async fn parse_packet(
     while let Ok(packet_id) = get_u8(&mut buf) {
         match packet_id {
             0 => keep_alive(&mut buf, stream).await?,
-            1 => {
-                let login_request = packet::LoginRequestPacket::nested_deserialize(&mut buf)?;
-                let protocol_version = login_request.protocol_version;
-                let username = login_request.username;
-
-                let entity_id = get_id();
-                // let seed = 1111423422i64;
-                let seed: i64 = 9065250152070435348;
-                // let seed: i64 = -4264101711260417039;
-                let dimension = 0i8; // -1 hell
-
-                let login_response = packet::LoginResponsePacket {
-                    entity_id,
-                    _unused1: String::new(),
-                    _unused2: String::new(),
-                    map_seed: seed,
-                    dimension,
-                };
-                login_response.send(stream).await?;
-
-                println!("protocol_version {protocol_version}");
-                println!("username {username}");
-                {
-                    let mut state = state.write().await;
-                    state.username = username;
-                    state.entity_id = entity_id;
-                }
-                logged_in.store(true, Ordering::Relaxed);
-
-                for chunk in chunks.iter() {
-                    send_chunk(chunk, stream).await.unwrap();
-                }
-                println!("sent map");
-
-                packet::SpawnPositionPacket {
-                    x: -56i32,
-                    y: 80i32,
-                    z: 70i32,
-                }
-                .send(stream)
-                .await?;
-
-                println!("sent spawn");
-
-                for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
-                    packet::PlayerInventoryPacket {
-                        inventory_type: id,
-                        count,
-                        payload: vec![(-1i16).to_be_bytes(); count as usize].concat(),
-                    }
-                    .send(stream)
-                    .await?;
-                }
-
-                println!("sent inv");
-
-                let x = 0.27f64;
-                let y = 74.62f64;
-                let z = 0.65f64;
-                let stance: f64 = y + 1.6;
-
-                let yaw = 0f32;
-                let pitch = 0f32;
-
-                let outer_state;
-                {
-                    let mut state = state.write().await;
-                    state.position_and_look.x = x;
-                    state.position_and_look.y = y;
-                    state.position_and_look.z = z;
-                    state.position_and_look.yaw = yaw;
-                    state.position_and_look.pitch = pitch;
-                    outer_state = (
-                        state.entity_id,
-                        state.position_and_look,
-                        Some(state.username.clone()),
-                    );
-                }
-                entity_tx
-                    .send((outer_state.0, outer_state.1, outer_state.2))
-                    .await
-                    .unwrap();
-
-                let on_ground = true;
-
-                packet::ServerPositionLookPacket {
-                    x,
-                    stance,
-                    y,
-                    z,
-                    yaw,
-                    pitch,
-                    on_ground,
-                }
-                .send(stream)
-                .await?;
-
-                println!("sent pos");
-
-                state.write().await.logged_in = true;
-            }
+            1 => login(stream, &mut buf, &chunks, logged_in, state, tx_entity).await?,
             // Handshake
             0x02 => {
                 // skip(&mut buf, 1)?;
@@ -504,7 +410,7 @@ async fn parse_packet(
                     state.position_and_look.z = z;
                     outer_state = (state.entity_id, state.position_and_look);
                 }
-                entity_tx
+                tx_entity
                     .send((outer_state.0, outer_state.1, None))
                     .await
                     .unwrap();
@@ -526,7 +432,7 @@ async fn parse_packet(
 
                     outer_state = (state.entity_id, state.position_and_look);
                 }
-                entity_tx
+                tx_entity
                     .send((outer_state.0, outer_state.1, None))
                     .await
                     .unwrap();
@@ -558,7 +464,7 @@ async fn parse_packet(
 
                     outer_state = (state.entity_id, state.position_and_look);
                 }
-                entity_tx
+                tx_entity
                     .send((outer_state.0, outer_state.1, None))
                     .await
                     .unwrap();
