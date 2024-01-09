@@ -1,3 +1,3 @@
 # betalpha
 
-A Minecraft Alpha 1.2.6 server implmentation
+A Minecraft Alpha 1.2.6 server implementation

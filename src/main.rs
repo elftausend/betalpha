@@ -10,7 +10,7 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 
-use global_handlers::{collection_center, CollectionCenter};
+use global_handlers::{collection_center, Animation, CollectionCenter};
 use procedures::login;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -73,10 +73,13 @@ async fn main() {
     let chunks = &*Box::leak(chunks.into_boxed_slice());
     let (tx_pos_and_look, rx_pos_and_look) =
         mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
-
     let (tx_pos_and_look_update, _pos_and_look_update_rx) = broadcast::channel(256);
+
     let (tx_destroy_self_entity, rx_entity_destroy) = mpsc::channel::<i32>(100);
     let (tx_destroy_entities, _) = broadcast::channel(256);
+
+    let (tx_animation, rx_animation) = mpsc::channel::<(i32, Animation)>(100);
+    let (tx_broadcast_animations, _) = broadcast::channel::<(i32, Animation)>(100);
 
     // several maps - avoid cloning of username (remove username from state -> username lookup ?)
     let entity_positions = std::collections::HashMap::new();
@@ -90,6 +93,8 @@ async fn main() {
             tx_pos_and_look_update: tx_pos_and_look_update.clone(),
             rx_entity_destroy,
             tx_destroy_entities: tx_destroy_entities.clone(),
+            rx_animation,
+            tx_broadcast_animations: tx_broadcast_animations.clone(),
         },
     ));
 
@@ -99,6 +104,8 @@ async fn main() {
             rx_entity_movement: tx_pos_and_look_update.clone().subscribe(),
             tx_destroy_self_entity: tx_destroy_self_entity.clone(),
             rx_destroy_entities: tx_destroy_entities.clone().subscribe(),
+            tx_animation: tx_animation.clone(),
+            rx_global_animations: tx_broadcast_animations.subscribe(),
         };
 
         let stream = listener.accept().await.unwrap();
@@ -125,6 +132,8 @@ pub struct Channels {
     )>,
     tx_destroy_self_entity: mpsc::Sender<i32>,
     rx_destroy_entities: broadcast::Receiver<i32>,
+    tx_animation: mpsc::Sender<(i32, Animation)>,
+    rx_global_animations: broadcast::Receiver<(i32, Animation)>,
 }
 
 const SIZE: usize = 1024 * 8;
@@ -162,6 +171,7 @@ async fn parse_packet(
     state: &RwLock<State>,
     tx_entity: &Sender<(i32, PositionAndLook, Option<String>)>,
     tx_disconnect: &Sender<i32>,
+    tx_animation: &Sender<(i32, Animation)>,
     logged_in: &AtomicBool,
 ) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
@@ -276,8 +286,11 @@ async fn parse_packet(
             }
             0x12 => {
                 let pid = get_i32(&mut buf)?;
-                let arm_winging = get_u8(&mut buf)? > 0;
-                println!("{pid} {arm_winging}")
+                let arm_swinging = get_u8(&mut buf)? > 0;
+                if arm_swinging {
+                    tx_animation.send((pid, Animation::Swing)).await.unwrap();
+                }
+                println!("{pid} {arm_swinging}")
             }
             0xff => {
                 // player.should_disconnect = true;
@@ -323,6 +336,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         rx_entity_movement,
         tx_destroy_self_entity,
         rx_destroy_entities,
+        tx_animation,
+        rx_global_animations: rx_global_animation,
     } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
@@ -359,6 +374,14 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         stream.clone(),
     ));
 
+    // animations
+    tokio::task::spawn(global_handlers::animations(
+        logged_in.clone(),
+        rx_global_animation,
+        state.clone(),
+        stream.clone(),
+    ));
+
     // tokio::task::spawn(global_handlers::animations(logged_in.clone(), rx_animations, stream));
 
     tokio::task::spawn(async move {
@@ -384,6 +407,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
             &state,
             &tx_player_pos_and_look,
             &tx_destroy_self_entity,
+            &tx_animation,
             &logged_in,
         )
         .await

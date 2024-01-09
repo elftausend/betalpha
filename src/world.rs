@@ -34,7 +34,7 @@ pub async fn send_chunk(chunk: &Chunk, stream: &mut TcpStream) -> Result<(), Pac
     to_compress.extend_from_slice(&chunk.sky_light);
 
     unsafe {
-        let mut len = libz_sys::compressBound(to_compress.len() as u64);
+        let mut len = libz_sys::compressBound(to_compress.len().try_into().unwrap());
         let mut compressed_bytes = vec![0u8; len as usize];
         libz_sys::compress(
             compressed_bytes.as_mut_ptr(),

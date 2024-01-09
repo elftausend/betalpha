@@ -22,6 +22,8 @@ pub struct CollectionCenter {
     )>,
     pub rx_entity_destroy: mpsc::Receiver<i32>,
     pub tx_destroy_entities: broadcast::Sender<i32>,
+    pub rx_animation: mpsc::Receiver<(i32, Animation)>,
+    pub tx_broadcast_animations: broadcast::Sender<(i32, Animation)>,
 }
 
 pub async fn collection_center(
@@ -34,6 +36,8 @@ pub async fn collection_center(
         tx_pos_and_look_update,
         mut rx_entity_destroy,
         tx_destroy_entities,
+        mut rx_animation,
+        tx_broadcast_animations,
     } = collection_center;
 
     loop {
@@ -66,6 +70,10 @@ pub async fn collection_center(
                     prev_pos_and_look,
                 ))
                 .unwrap();
+        }
+
+        if let Ok((eid, animation)) = rx_animation.try_recv() {
+            tx_broadcast_animations.send((eid, animation)).unwrap();
         }
 
         if let Ok(eid) = rx_entity_destroy.try_recv() {

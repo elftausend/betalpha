@@ -84,7 +84,7 @@ mod to_client_packets {
     #[serialize(0x12)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct AnimationPacket {
-        pub entity_id: u32,
+        pub entity_id: i32,
         pub animate: u8,
     }
     #[serialize(0x14)]
