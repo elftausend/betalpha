@@ -11,6 +11,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 
 use global_handlers::{collection_center, Animation, CollectionCenter};
+use movement::tx_crouching_animation;
 use procedures::login;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -25,6 +26,7 @@ use world::{load_demo::load_entire_world, Chunk};
 
 // if other clients want to interact with this client
 mod global_handlers;
+mod movement;
 mod packet;
 mod utils;
 mod world;
@@ -212,8 +214,8 @@ async fn parse_packet(
                     z,
                     on_ground,
                 } = packet::PlayerPositionPacket::nested_deserialize(&mut buf)?;
-
                 let outer_state;
+                let eid;
                 {
                     let mut state = state.write().await;
                     state.stance = stance;
@@ -222,7 +224,10 @@ async fn parse_packet(
                     state.position_and_look.y = y;
                     state.position_and_look.z = z;
                     outer_state = (state.entity_id, state.position_and_look);
+                    eid = state.entity_id;
                 }
+
+                tx_crouching_animation(eid, stance, y, tx_animation, state).await.unwrap();
                 tx_entity
                     .send((outer_state.0, outer_state.1, None))
                     .await
@@ -264,6 +269,7 @@ async fn parse_packet(
                 } = packet::PlayerPositionLookPacket::nested_deserialize(&mut buf)?;
 
                 let outer_state;
+                let eid;
                 {
                     let mut state = state.write().await;
                     state.position_and_look.x = x;
@@ -276,7 +282,10 @@ async fn parse_packet(
                     state.stance = stance;
 
                     outer_state = (state.entity_id, state.position_and_look);
+                    eid = state.entity_id;
                 }
+
+                tx_crouching_animation(eid, stance, y, tx_animation, state).await.unwrap();
                 tx_entity
                     .send((outer_state.0, outer_state.1, None))
                     .await
@@ -317,6 +326,7 @@ pub struct State {
     stance: f64,
     on_ground: bool,
     position_and_look: PositionAndLook,
+    is_crouching: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -349,6 +359,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         logged_in: false,
         stance: 0.,
         on_ground: true,
+        is_crouching: false,
         position_and_look: PositionAndLook {
             x: 0.,
             y: 0.,
@@ -381,8 +392,6 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         state.clone(),
         stream.clone(),
     ));
-
-    // tokio::task::spawn(global_handlers::animations(logged_in.clone(), rx_animations, stream));
 
     tokio::task::spawn(async move {
         loop {

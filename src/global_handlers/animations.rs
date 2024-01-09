@@ -5,7 +5,10 @@ use tokio::{
     sync::{broadcast, RwLock},
 };
 
-use crate::{packet::{self, util::SendPacket}, State};
+use crate::{
+    packet::{self, util::SendPacket},
+    State,
+};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
