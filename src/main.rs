@@ -12,7 +12,10 @@ use bytes::{Buf, BytesMut};
 
 use global_handlers::{collection_center, Animation, CollectionCenter};
 use movement::tx_crouching_animation;
-use procedures::login;
+use procedures::{
+    login,
+    passive::{player_look, player_position, player_position_and_look},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -206,93 +209,10 @@ async fn parse_packet(
                 // println!("on_ground: {on_ground}");
             }
 
-            0x0B => {
-                let packet::PlayerPositionPacket {
-                    x,
-                    y,
-                    stance,
-                    z,
-                    on_ground,
-                } = packet::PlayerPositionPacket::nested_deserialize(&mut buf)?;
-                let outer_state;
-                let eid;
-                {
-                    let mut state = state.write().await;
-                    state.stance = stance;
-                    state.on_ground = on_ground;
-                    state.position_and_look.x = x;
-                    state.position_and_look.y = y;
-                    state.position_and_look.z = z;
-                    outer_state = (state.entity_id, state.position_and_look);
-                    eid = state.entity_id;
-                }
+            0x0B => player_position(&mut buf, state, tx_entity, tx_animation).await?,
+            0x0C => player_look(&mut buf, state, tx_entity).await?,
+            0x0D => player_position_and_look(&mut buf, state, tx_entity, tx_animation).await?,
 
-                tx_crouching_animation(eid, stance, y, tx_animation, state).await.unwrap();
-                tx_entity
-                    .send((outer_state.0, outer_state.1, None))
-                    .await
-                    .unwrap();
-                // println!("{x} {y} {stance} {z} {on_ground}");
-            }
-
-            0x0C => {
-                let yaw = get_f32(&mut buf)?;
-                let pitch = get_f32(&mut buf)?;
-                let on_ground = get_u8(&mut buf)? != 0;
-
-                let outer_state;
-                {
-                    let mut state = state.write().await;
-                    state.position_and_look.yaw = yaw;
-                    state.position_and_look.pitch = pitch;
-
-                    state.on_ground = on_ground;
-
-                    outer_state = (state.entity_id, state.position_and_look);
-                }
-                tx_entity
-                    .send((outer_state.0, outer_state.1, None))
-                    .await
-                    .unwrap();
-                // println!("{yaw} {pitch} {on_ground}");
-            }
-
-            0x0D => {
-                let packet::PlayerPositionLookPacket {
-                    x,
-                    y,
-                    stance,
-                    z,
-                    yaw,
-                    pitch,
-                    on_ground,
-                } = packet::PlayerPositionLookPacket::nested_deserialize(&mut buf)?;
-
-                let outer_state;
-                let eid;
-                {
-                    let mut state = state.write().await;
-                    state.position_and_look.x = x;
-                    state.position_and_look.y = y;
-                    state.position_and_look.z = z;
-                    state.position_and_look.yaw = yaw;
-                    state.position_and_look.pitch = pitch;
-
-                    state.on_ground = on_ground;
-                    state.stance = stance;
-
-                    outer_state = (state.entity_id, state.position_and_look);
-                    eid = state.entity_id;
-                }
-
-                tx_crouching_animation(eid, stance, y, tx_animation, state).await.unwrap();
-                tx_entity
-                    .send((outer_state.0, outer_state.1, None))
-                    .await
-                    .unwrap();
-
-                // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
-            }
             0x12 => {
                 let pid = get_i32(&mut buf)?;
                 let arm_swinging = get_u8(&mut buf)? > 0;
