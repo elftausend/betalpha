@@ -11,7 +11,6 @@ use std::{
 use bytes::{Buf, BytesMut};
 
 use global_handlers::{collection_center, Animation, CollectionCenter};
-use movement::tx_crouching_animation;
 use procedures::{
     login,
     passive::{player_look, player_position, player_position_and_look},
@@ -38,7 +37,7 @@ mod world;
 mod procedures;
 
 use crate::packet::PacketError;
-use crate::packet::{util::*, Deserialize};
+use crate::packet::util::*;
 
 // mod byte_man;
 // pub use byte_man::*;
@@ -143,11 +142,6 @@ pub struct Channels {
 
 const SIZE: usize = 1024 * 8;
 
-#[derive(Debug)]
-pub struct ClientHandshake {
-    username: String,
-}
-
 pub enum Error {
     Incomplete,
 }
@@ -195,10 +189,9 @@ async fn parse_packet(
             0x02 => {
                 // skip(&mut buf, 1)?;
                 let username = get_string(&mut buf)?;
-                let ch = ClientHandshake { username };
                 stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
                 stream.flush().await.unwrap();
-                println!("ch: {ch:?}");
+                println!("ch: {username:?}");
             }
             0x03 => {
                 let message = get_string(&mut buf)?;
@@ -215,11 +208,9 @@ async fn parse_packet(
 
             0x12 => {
                 let pid = get_i32(&mut buf)?;
-                let arm_swinging = get_u8(&mut buf)? > 0;
-                if arm_swinging {
-                    tx_animation.send((pid, Animation::Swing)).await.unwrap();
-                }
-                println!("{pid} {arm_swinging}")
+                let animation = get_u8(&mut buf)?;
+                tx_animation.send((pid, Animation::from(animation))).await.unwrap();
+                // println!("{pid} {arm_swinging}")
             }
             0xff => {
                 // player.should_disconnect = true;

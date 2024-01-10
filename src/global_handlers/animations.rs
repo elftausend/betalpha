@@ -25,6 +25,27 @@ pub enum Animation {
     NotCrouching = 105,
 }
 
+impl From<u8> for Animation {
+    #[inline]
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Animation::None,
+            1 => Animation::Swing,
+            2 => Animation::Death,
+            100 => Animation::Sitting,
+            101 => Animation::NotSitting,
+            102 => Animation::Fire,
+            103 => Animation::NotFire,
+            104 => Animation::Crouching,
+            105 => Animation::NotCrouching,
+
+            // error
+            _ => Animation::None
+        }
+    }
+}
+
+
 pub async fn animations(
     logged_in: Arc<AtomicBool>,
     mut rx_animations: broadcast::Receiver<(i32, Animation)>,
