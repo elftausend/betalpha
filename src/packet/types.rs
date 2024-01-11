@@ -283,8 +283,8 @@ mod to_client_packets {
         pub x: i32,
         pub y: i8,
         pub z: i32,
-        pub block_type: u8,
-        pub block_metadata: u8,
+        pub block_type: i8,
+        pub block_metadata: i8,
     }
     #[serialize(0x3B)]
     #[derive(Debug, Clone, Deserialize)]
@@ -394,11 +394,11 @@ pub mod to_server_packets {
     #[serialize(0x0F)]
     #[derive(Debug, Clone, Copy, Deserialize)]
     pub struct PlayerBlockPlacementPacket {
-        pub item_id: u16,
+        pub item_id: i16,
         pub x: i32,
         pub y: i8,
         pub z: i32,
-        pub face: u8,
+        pub face: i8,
     }
     #[serialize(0x10)]
     #[derive(Debug, Clone, Copy, Deserialize)]

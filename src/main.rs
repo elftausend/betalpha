@@ -333,6 +333,13 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         state.clone(),
         stream.clone(),
     ));
+    
+    tokio::task::spawn(global_handlers::block_updates(
+        logged_in.clone(),
+        rx_global_block_update,
+        state.clone(),
+        stream.clone(),
+    ));
 
     tokio::task::spawn(async move {
         loop {

@@ -83,6 +83,14 @@ pub async fn collection_center(
             tx_broadcast_animations.send((eid, animation)).unwrap();
         }
 
+        if let Ok(block_update) = rx_block_updates.try_recv() {
+            match block_update {
+                BlockUpdate::Place(_) => {},
+                BlockUpdate::Break(_) => {},
+            }
+            tx_broadcast_block_updates.send(block_update).unwrap();
+        }
+
         if let Ok(eid) = rx_entity_destroy.try_recv() {
             entity_positions.remove(&eid);
             entity_username.remove(&eid);
