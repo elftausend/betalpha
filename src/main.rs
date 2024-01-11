@@ -11,6 +11,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 
 use global_handlers::{collection_center, Animation, CollectionCenter};
+use packet::{Deserialize, PlayerBlockPlacementPacket};
 use procedures::{
     login,
     passive::{player_look, player_position, player_position_and_look},
@@ -24,7 +25,7 @@ use tokio::{
         RwLock,
     },
 };
-use world::{load_demo::load_entire_world, Chunk};
+use world::{load_demo::load_entire_world, Chunk, BlockUpdate};
 
 // if other clients want to interact with this client
 mod global_handlers;
@@ -36,8 +37,8 @@ mod world;
 // if the server (instantly) reacts to client activity
 mod procedures;
 
-use crate::packet::PacketError;
 use crate::packet::util::*;
+use crate::packet::PacketError;
 
 // mod byte_man;
 // pub use byte_man::*;
@@ -85,6 +86,9 @@ async fn main() {
     let (tx_animation, rx_animation) = mpsc::channel::<(i32, Animation)>(100);
     let (tx_broadcast_animations, _) = broadcast::channel::<(i32, Animation)>(100);
 
+    let (tx_block_update, rx_block_updates) = mpsc::channel::<BlockUpdate>(100);
+    let (tx_broadcast_block_updates, _) = broadcast::channel::<BlockUpdate>(100);
+
     // several maps - avoid cloning of username (remove username from state -> username lookup ?)
     let entity_positions = std::collections::HashMap::new();
     let entity_username = std::collections::HashMap::new();
@@ -99,6 +103,8 @@ async fn main() {
             tx_destroy_entities: tx_destroy_entities.clone(),
             rx_animation,
             tx_broadcast_animations: tx_broadcast_animations.clone(),
+            rx_block_updates,
+            tx_broadcast_block_updates: tx_broadcast_block_updates.clone(),
         },
     ));
 
@@ -110,6 +116,8 @@ async fn main() {
             rx_destroy_entities: tx_destroy_entities.clone().subscribe(),
             tx_animation: tx_animation.clone(),
             rx_global_animations: tx_broadcast_animations.subscribe(),
+            tx_block_update: tx_block_update.clone(),
+            rx_global_block_update: tx_broadcast_block_updates.subscribe(),
         };
 
         let stream = listener.accept().await.unwrap();
@@ -138,6 +146,8 @@ pub struct Channels {
     rx_destroy_entities: broadcast::Receiver<i32>,
     tx_animation: mpsc::Sender<(i32, Animation)>,
     rx_global_animations: broadcast::Receiver<(i32, Animation)>,
+    tx_block_update: mpsc::Sender<BlockUpdate>,
+    rx_global_block_update: broadcast::Receiver<BlockUpdate>,
 }
 
 const SIZE: usize = 1024 * 8;
@@ -171,6 +181,7 @@ async fn parse_packet(
     tx_entity: &Sender<(i32, PositionAndLook, Option<String>)>,
     tx_disconnect: &Sender<i32>,
     tx_animation: &Sender<(i32, Animation)>,
+    tx_block_update: &Sender<BlockUpdate>,
     logged_in: &AtomicBool,
 ) -> Result<usize, PacketError> {
     let mut buf = Cursor::new(&buf[..]);
@@ -209,7 +220,10 @@ async fn parse_packet(
             0x12 => {
                 let pid = get_i32(&mut buf)?;
                 let animation = get_u8(&mut buf)?;
-                tx_animation.send((pid, Animation::from(animation))).await.unwrap();
+                tx_animation
+                    .send((pid, Animation::from(animation)))
+                    .await
+                    .unwrap();
                 // println!("{pid} {arm_swinging}")
             }
             0xff => {
@@ -221,6 +235,20 @@ async fn parse_packet(
                     .await
                     .unwrap();
             }
+
+            0x0E => {
+                let data = packet::PlayerDiggingPacket::nested_deserialize(&mut buf)?;
+                // block broken
+                if data.status == 3 {
+                    tx_block_update.send(BlockUpdate::Break((data.x, data.y, data.z))).await.unwrap();
+                }
+            }
+
+            0x0F => {
+                let data = packet::PlayerBlockPlacementPacket::nested_deserialize(&mut buf)?;
+                tx_block_update.send(BlockUpdate::Place(data)).await.unwrap();
+            }
+
             _ => {
                 println!("packet_id: {packet_id}");
                 return Err(PacketError::NotEnoughBytes);
@@ -259,6 +287,8 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         rx_destroy_entities,
         tx_animation,
         rx_global_animations: rx_global_animation,
+        tx_block_update,
+        rx_global_block_update,
     } = channels;
 
     let stream = Arc::new(RwLock::new(stream));
@@ -328,6 +358,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
             &tx_player_pos_and_look,
             &tx_destroy_self_entity,
             &tx_animation,
+            &tx_block_update,
             &logged_in,
         )
         .await

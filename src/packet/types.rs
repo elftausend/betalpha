@@ -392,7 +392,7 @@ pub mod to_server_packets {
         pub face: u8,
     }
     #[serialize(0x0F)]
-    #[derive(Debug, Clone, Deserialize)]
+    #[derive(Debug, Clone, Copy, Deserialize)]
     pub struct PlayerBlockPlacementPacket {
         pub item_id: u16,
         pub x: i32,
@@ -401,7 +401,7 @@ pub mod to_server_packets {
         pub face: u8,
     }
     #[serialize(0x10)]
-    #[derive(Debug, Clone, Deserialize)]
+    #[derive(Debug, Clone, Copy, Deserialize)]
     pub struct HoldingChangePacket {
         pub _unused: i32,
         pub item_id: u16,

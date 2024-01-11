@@ -7,9 +7,12 @@ pub use destroy_entities::*;
 mod animations;
 pub use animations::*;
 
+mod blocks;
+pub use blocks::*;
+
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{entities, PositionAndLook};
+use crate::{entities, PositionAndLook, packet::PlayerBlockPlacementPacket, world::BlockUpdate};
 use std::collections::HashMap;
 
 pub struct CollectionCenter {
@@ -24,6 +27,8 @@ pub struct CollectionCenter {
     pub tx_destroy_entities: broadcast::Sender<i32>,
     pub rx_animation: mpsc::Receiver<(i32, Animation)>,
     pub tx_broadcast_animations: broadcast::Sender<(i32, Animation)>,
+    pub rx_block_updates: mpsc::Receiver<BlockUpdate>,
+    pub tx_broadcast_block_updates: broadcast::Sender<BlockUpdate>,
 }
 
 pub async fn collection_center(
@@ -38,6 +43,8 @@ pub async fn collection_center(
         tx_destroy_entities,
         mut rx_animation,
         tx_broadcast_animations,
+        mut rx_block_updates,
+        tx_broadcast_block_updates,
     } = collection_center;
 
     loop {

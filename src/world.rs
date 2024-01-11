@@ -1,8 +1,14 @@
 use tokio::net::TcpStream;
 
-use crate::packet::{self, util::SendPacket, PacketError};
+use crate::packet::{self, util::SendPacket, PacketError, PlayerBlockPlacementPacket};
 
 pub mod load_demo;
+
+#[derive(Debug, Clone, Copy)]
+pub enum BlockUpdate {
+    Place(PlayerBlockPlacementPacket),
+    Break((i32, i8, i32))
+}
 
 pub struct Chunk {
     pub chunk_x: i32,

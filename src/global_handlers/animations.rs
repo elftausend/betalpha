@@ -40,11 +40,10 @@ impl From<u8> for Animation {
             105 => Animation::NotCrouching,
 
             // error
-            _ => Animation::None
+            _ => Animation::None,
         }
     }
 }
-
 
 pub async fn animations(
     logged_in: Arc<AtomicBool>,
