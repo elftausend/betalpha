@@ -23,7 +23,7 @@ pub async fn block_updates(
         }
 
         if let Ok(block_update) = rx_block_updates.recv().await {
-            let (x, y, z, id, meta);
+            let (mut x, mut y, mut z, id, meta);
 
             println!("block update");
 
@@ -34,6 +34,15 @@ pub async fn block_updates(
                     x = block_info.x;
                     y = block_info.y;
                     z = block_info.z;
+                    match block_info.face {
+                        0 => y-=1,
+                        1 => y+=1,
+                        2 => z-=1,
+                        3 => z+=1,
+                        4 => x-=1,
+                        5 => x+=1,
+                        _ => {}
+                    }
                     id = block_info.item_id as i8;
                     // meta = block_info.face
                     meta = 0;
