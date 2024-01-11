@@ -92,8 +92,13 @@ mod to_client_packets {
                     uses,
                 });
             }
-            todo!()
+            Ok(PlayerInventoryPacket {
+                inventory_type,
+                count,
+                items,
+            })
         }
+        
     }
 
     #[serialize(0x06)]
