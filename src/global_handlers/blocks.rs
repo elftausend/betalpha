@@ -35,12 +35,12 @@ pub async fn block_updates(
                     y = block_info.y;
                     z = block_info.z;
                     match block_info.face {
-                        0 => y-=1,
-                        1 => y+=1,
-                        2 => z-=1,
-                        3 => z+=1,
-                        4 => x-=1,
-                        5 => x+=1,
+                        0 => y -= 1,
+                        1 => y += 1,
+                        2 => z -= 1,
+                        3 => z += 1,
+                        4 => x -= 1,
+                        5 => x += 1,
                         _ => {}
                     }
                     id = block_info.item_id as i8;

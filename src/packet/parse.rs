@@ -76,122 +76,117 @@ impl PacketSerializer {
     }
 }
 
-#[derive(Default)]
-pub struct PacketDeserializer;
+pub fn deserialize_bool(v: &mut Cursor<&[u8]>) -> Result<bool, PacketError> {
+    if v.remaining() < 1 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_u8() > 0)
+    }
+}
 
-impl PacketDeserializer {
-    pub fn deserialize_bool(v: &mut Cursor<&[u8]>) -> Result<(usize, bool), PacketError> {
-        if v.remaining() < 1 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((1, v.get_u8() > 0))
-        }
+pub fn deserialize_u8(v: &mut Cursor<&[u8]>) -> Result<u8, PacketError> {
+    if v.remaining() < 1 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_u8())
+    }
+}
+
+pub fn deserialize_u16(v: &mut Cursor<&[u8]>) -> Result<u16, PacketError> {
+    if v.remaining() < 2 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_u16())
+    }
+}
+
+pub fn deserialize_u32(v: &mut Cursor<&[u8]>) -> Result<u32, PacketError> {
+    if v.remaining() < 4 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_u32())
+    }
+}
+
+pub fn deserialize_u64(v: &mut Cursor<&[u8]>) -> Result<u64, PacketError> {
+    if v.remaining() < 8 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_u64())
+    }
+}
+
+pub fn deserialize_f32(v: &mut Cursor<&[u8]>) -> Result<f32, PacketError> {
+    if v.remaining() < 4 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_f32())
+    }
+}
+
+pub fn deserialize_f64(v: &mut Cursor<&[u8]>) -> Result<f64, PacketError> {
+    if v.remaining() < 8 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_f64())
+    }
+}
+
+pub fn deserialize_i8(v: &mut Cursor<&[u8]>) -> Result<i8, PacketError> {
+    if v.remaining() < 1 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_i8())
+    }
+}
+
+pub fn deserialize_i16(v: &mut Cursor<&[u8]>) -> Result<i16, PacketError> {
+    if v.remaining() < 2 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_i16())
+    }
+}
+
+pub fn deserialize_i32(v: &mut Cursor<&[u8]>) -> Result<i32, PacketError> {
+    if v.remaining() < 4 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_i32())
+    }
+}
+
+pub fn deserialize_i64(v: &mut Cursor<&[u8]>) -> Result<i64, PacketError> {
+    if v.remaining() < 8 {
+        Err(PacketError::NotEnoughBytes)
+    } else {
+        Ok(v.get_i64())
+    }
+}
+
+pub fn deserialize_string(v: &mut Cursor<&[u8]>) -> Result<String, PacketError> {
+    let len = deserialize_u16(v)? as usize;
+
+    if v.remaining() < len {
+        return Err(PacketError::NotEnoughBytes);
     }
 
-    pub fn deserialize_u8(v: &mut Cursor<&[u8]>) -> Result<(usize, u8), PacketError> {
-        if v.remaining() < 1 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((1, v.get_u8()))
-        }
+    let string =
+        String::from_utf8(v.chunk()[..len].to_vec()).map_err(|_e| PacketError::InvalidString)?;
+    v.advance(len);
+    Ok(string)
+}
+
+pub fn deserialize_payload(v: &mut Cursor<&[u8]>) -> Result<Vec<u8>, PacketError> {
+    let len = deserialize_u16(v)? as usize;
+
+    if v.remaining() < len {
+        return Err(PacketError::NotEnoughBytes);
     }
 
-    pub fn deserialize_u16(v: &mut Cursor<&[u8]>) -> Result<(usize, u16), PacketError> {
-        if v.remaining() < 2 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((2, v.get_u16()))
-        }
-    }
-
-    pub fn deserialize_u32(v: &mut Cursor<&[u8]>) -> Result<(usize, u32), PacketError> {
-        if v.remaining() < 4 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((4, v.get_u32()))
-        }
-    }
-
-    pub fn deserialize_u64(v: &mut Cursor<&[u8]>) -> Result<(usize, u64), PacketError> {
-        if v.remaining() < 8 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((8, v.get_u64()))
-        }
-    }
-
-    pub fn deserialize_f32(v: &mut Cursor<&[u8]>) -> Result<(usize, f32), PacketError> {
-        if v.remaining() < 4 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((4, v.get_f32()))
-        }
-    }
-
-    pub fn deserialize_f64(v: &mut Cursor<&[u8]>) -> Result<(usize, f64), PacketError> {
-        if v.remaining() < 8 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((8, v.get_f64()))
-        }
-    }
-
-    pub fn deserialize_i8(v: &mut Cursor<&[u8]>) -> Result<(usize, i8), PacketError> {
-        if v.remaining() < 1 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((1, v.get_i8()))
-        }
-    }
-
-    pub fn deserialize_i16(v: &mut Cursor<&[u8]>) -> Result<(usize, i16), PacketError> {
-        if v.remaining() < 2 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((2, v.get_i16()))
-        }
-    }
-
-    pub fn deserialize_i32(v: &mut Cursor<&[u8]>) -> Result<(usize, i32), PacketError> {
-        if v.remaining() < 4 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((4, v.get_i32()))
-        }
-    }
-
-    pub fn deserialize_i64(v: &mut Cursor<&[u8]>) -> Result<(usize, i64), PacketError> {
-        if v.remaining() < 8 {
-            Err(PacketError::NotEnoughBytes)
-        } else {
-            Ok((8, v.get_i64()))
-        }
-    }
-
-    pub fn deserialize_string(v: &mut Cursor<&[u8]>) -> Result<(usize, String), PacketError> {
-        let len = Self::deserialize_u16(v)?.1 as usize;
-
-        if v.remaining() < len {
-            return Err(PacketError::NotEnoughBytes);
-        }
-
-        let string = String::from_utf8(v.chunk()[..len].to_vec())
-            .map_err(|_e| PacketError::InvalidString)?;
-        v.advance(len);
-        Ok((len, string))
-    }
-
-    pub fn deserialize_payload(v: &mut Cursor<&[u8]>) -> Result<(usize, Vec<u8>), PacketError> {
-        let len = Self::deserialize_u16(v)?.1 as usize;
-
-        if v.remaining() < len {
-            return Err(PacketError::NotEnoughBytes);
-        }
-
-        let vec = v.get_ref()[..len].to_vec();
-        v.advance(len);
-        Ok((len, vec))
-    }
+    let vec = v.get_ref()[..len].to_vec();
+    v.advance(len);
+    Ok(vec)
 }
 
 pub trait Serialize: Sized {

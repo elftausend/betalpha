@@ -2,7 +2,7 @@ mod to_client_packets {
     use super::super::parse::PacketSerializer;
     use super::super::PacketError;
     use crate::packet::{
-        parse::{Deserialize, PacketDeserializer},
+        deserialize_i16, deserialize_i32, deserialize_i8, deserialize_u16, parse::Deserialize,
         Serialize,
     };
     use betalpha_derive::{serialize, Deserialize};
@@ -73,19 +73,19 @@ mod to_client_packets {
 
     impl Deserialize for PlayerInventoryPacket {
         fn nested_deserialize(cursor: &mut std::io::Cursor<&[u8]>) -> Result<Self, PacketError> {
-            let inventory_type = cursor.get_i32();
-            let count = cursor.get_i16();
+            let inventory_type = deserialize_i32(cursor)?;
+            let count = deserialize_i16(cursor)?;
             let mut items = vec![None; count as usize];
 
             for idx in 0..count {
-                let item_id = cursor.get_i16();
+                let item_id = deserialize_i16(cursor)?;
 
                 if item_id == -1 {
                     continue;
                 }
 
-                let count = cursor.get_i8();
-                let uses = cursor.get_i16();
+                let count = deserialize_i8(cursor)?;
+                let uses = deserialize_i16(cursor)?;
                 items[idx as usize] = Some(Item {
                     item_id,
                     count,
@@ -98,7 +98,6 @@ mod to_client_packets {
                 items,
             })
         }
-        
     }
 
     #[serialize(0x06)]
@@ -314,9 +313,10 @@ mod to_client_packets {
 
     impl Deserialize for MultiBlockChangePacket {
         fn nested_deserialize(cursor: &mut Cursor<&[u8]>) -> Result<Self, PacketError> {
-            let (_n, chunk_x): (usize, i32) = PacketDeserializer::deserialize_i32(cursor)?;
-            let (_n, chunk_y): (usize, i32) = PacketDeserializer::deserialize_i32(cursor)?;
-            let (_n, array_size): (usize, u16) = PacketDeserializer::deserialize_u16(cursor)?;
+            let chunk_x = deserialize_i32(cursor)?;
+            let chunk_y = deserialize_i32(cursor)?;
+            let array_size = deserialize_u16(cursor)?;
+
             let remaining = cursor.chunk();
             let coordinate_array = remaining[0..array_size as usize * 2]
                 .to_vec()

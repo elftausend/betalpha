@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     get_id,
-    packet::{self, util::SendPacket, Deserialize, PacketError, Item},
+    packet::{self, util::SendPacket, Deserialize, Item, PacketError},
     world::send_chunk,
     Chunk, PositionAndLook, State,
 };
@@ -68,11 +68,13 @@ pub async fn login(
 
     for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
         let mut items = vec![None; count as usize];
-        items[0] = Some(Item {
-            item_id: 54,
-            count: 64,
-            uses: 0,
-        });
+        if id == -1 {
+            items[1] = Some(Item {
+                item_id: 1, // 54: chest, 51: fire
+                count: 64,
+                uses: 0,
+            });
+        }
         packet::PlayerInventoryPacket {
             inventory_type: id,
             count,
