@@ -35,13 +35,67 @@ mod to_client_packets {
     pub struct TimeUpdatePacket {
         pub time: u64,
     }
-    #[serialize(0x05)]
-    #[derive(Debug, Clone, Deserialize)]
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct Item {
+        pub item_id: i16,
+        pub count: i8,
+        pub uses: i16,
+    }
+
+    // #[serialize(0x05)]
+    #[derive(Debug, Clone)]
     pub struct PlayerInventoryPacket {
         pub inventory_type: i32,
         pub count: i16,
-        pub payload: Vec<u8>,
+        pub items: Vec<Option<Item>>,
     }
+
+    impl Serialize for PlayerInventoryPacket {
+        fn serialize(&self) -> Result<Vec<u8>, PacketError> {
+            let mut serializer = PacketSerializer::default();
+            serializer.serialize_u8(0x05)?;
+            serializer.serialize_i32(self.inventory_type)?;
+            serializer.serialize_i16(self.count)?;
+            for item in &self.items {
+                match item {
+                    Some(item) => {
+                        serializer.serialize_i16(item.item_id)?;
+                        serializer.serialize_i8(item.count)?;
+                        serializer.serialize_i16(item.uses)?;
+                    }
+                    None => serializer.serialize_i16(-1)?,
+                }
+            }
+            Ok(serializer.output)
+        }
+    }
+
+    impl Deserialize for PlayerInventoryPacket {
+        fn nested_deserialize(cursor: &mut std::io::Cursor<&[u8]>) -> Result<Self, PacketError> {
+            let inventory_type = cursor.get_i32();
+            let count = cursor.get_i16();
+            let mut items = vec![None; count as usize];
+
+            for idx in 0..count {
+                let item_id = cursor.get_i16();
+
+                if item_id == -1 {
+                    continue;
+                }
+
+                let count = cursor.get_i8();
+                let uses = cursor.get_i16();
+                items[idx as usize] = Some(Item {
+                    item_id,
+                    count,
+                    uses,
+                });
+            }
+            todo!()
+        }
+    }
+
     #[serialize(0x06)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct SpawnPositionPacket {

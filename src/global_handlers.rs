@@ -12,7 +12,7 @@ pub use blocks::*;
 
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{entities, PositionAndLook, packet::PlayerBlockPlacementPacket, world::BlockUpdate};
+use crate::{entities, packet::PlayerBlockPlacementPacket, world::BlockUpdate, PositionAndLook};
 use std::collections::HashMap;
 
 pub struct CollectionCenter {
@@ -85,8 +85,8 @@ pub async fn collection_center(
 
         if let Ok(block_update) = rx_block_updates.try_recv() {
             match block_update {
-                BlockUpdate::Place(_) => {},
-                BlockUpdate::Break(_) => {},
+                BlockUpdate::Place(_) => {}
+                BlockUpdate::Break(_) => {}
             }
             tx_broadcast_block_updates.send(block_update).unwrap();
         }

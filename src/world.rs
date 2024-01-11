@@ -7,7 +7,7 @@ pub mod load_demo;
 #[derive(Debug, Clone, Copy)]
 pub enum BlockUpdate {
     Place(PlayerBlockPlacementPacket),
-    Break((i32, i8, i32))
+    Break((i32, i8, i32)),
 }
 
 pub struct Chunk {

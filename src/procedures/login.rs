@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     get_id,
-    packet::{self, util::SendPacket, Deserialize, PacketError},
+    packet::{self, util::SendPacket, Deserialize, PacketError, Item},
     world::send_chunk,
     Chunk, PositionAndLook, State,
 };
@@ -67,10 +67,16 @@ pub async fn login(
     println!("sent spawn");
 
     for (id, count) in [(-1i32, 36i16), (-2, 4), (-3, 4)] {
+        let mut items = vec![None; count as usize];
+        items[0] = Some(Item {
+            item_id: 54,
+            count: 64,
+            uses: 0,
+        });
         packet::PlayerInventoryPacket {
             inventory_type: id,
             count,
-            payload: vec![(-1i16).to_be_bytes(); count as usize].concat(),
+            items,
         }
         .send(stream)
         .await?;

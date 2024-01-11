@@ -25,7 +25,7 @@ use tokio::{
         RwLock,
     },
 };
-use world::{load_demo::load_entire_world, Chunk, BlockUpdate};
+use world::{load_demo::load_entire_world, BlockUpdate, Chunk};
 
 // if other clients want to interact with this client
 mod global_handlers;
@@ -189,7 +189,7 @@ async fn parse_packet(
     // let packet_id = get_u8(&mut buf)?;
     // println!("packet_id: {packet_id}");
 
-    // println!("buf: {buf:?}");
+    println!("buf: {buf:?}");
 
     // some packets may accumulate, therefore process all of them (happened especially for 0x0A)
     while let Ok(packet_id) = get_u8(&mut buf) {
@@ -240,13 +240,29 @@ async fn parse_packet(
                 let data = packet::PlayerDiggingPacket::nested_deserialize(&mut buf)?;
                 // block broken
                 if data.status == 3 {
-                    tx_block_update.send(BlockUpdate::Break((data.x, data.y, data.z))).await.unwrap();
+                    tx_block_update
+                        .send(BlockUpdate::Break((data.x, data.y, data.z)))
+                        .await
+                        .unwrap();
                 }
             }
 
             0x0F => {
+                println!("place");
                 let data = packet::PlayerBlockPlacementPacket::nested_deserialize(&mut buf)?;
-                tx_block_update.send(BlockUpdate::Place(data)).await.unwrap();
+                tx_block_update
+                    .send(BlockUpdate::Place(data))
+                    .await
+                    .unwrap();
+            }
+
+            0x10 => {
+                let data = packet::HoldingChangePacket::nested_deserialize(&mut buf)?;
+            }
+
+            // client inv
+            0x05 => {
+                let data = packet::PlayerInventoryPacket::nested_deserialize(&mut buf)?;
             }
 
             _ => {
@@ -333,7 +349,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         state.clone(),
         stream.clone(),
     ));
-    
+
     tokio::task::spawn(global_handlers::block_updates(
         logged_in.clone(),
         rx_global_block_update,

@@ -1,8 +1,15 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
-use tokio::{sync::{broadcast, RwLock}, net::TcpStream};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, RwLock},
+};
 
-use crate::{world::BlockUpdate, State, packet::{self, util::SendPacket}};
+use crate::{
+    packet::{self, util::SendPacket},
+    world::BlockUpdate,
+    State,
+};
 
 pub async fn block_updates(
     logged_in: Arc<AtomicBool>,
@@ -17,7 +24,9 @@ pub async fn block_updates(
 
         if let Ok(block_update) = rx_block_updates.recv().await {
             let (x, y, z, id, meta);
- 
+
+            println!("block update");
+
             // check distance etc of player
 
             match block_update {
@@ -26,8 +35,9 @@ pub async fn block_updates(
                     y = block_info.y;
                     z = block_info.z;
                     id = block_info.item_id as i8;
-                    meta = block_info.face
-                },
+                    // meta = block_info.face
+                    meta = 0;
+                }
                 BlockUpdate::Break((break_x, break_y, break_z)) => {
                     x = break_x;
                     y = break_y;
@@ -41,9 +51,11 @@ pub async fn block_updates(
                 y,
                 z,
                 block_type: id,
-                block_metadata: meta
-            }.send(&mut *stream.write().await).await.unwrap();
+                block_metadata: meta,
+            }
+            .send(&mut *stream.write().await)
+            .await
+            .unwrap();
         }
     }
 }
-
