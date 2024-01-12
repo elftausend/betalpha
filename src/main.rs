@@ -189,7 +189,7 @@ async fn parse_packet(
     // let packet_id = get_u8(&mut buf)?;
     // println!("packet_id: {packet_id}");
 
-    println!("buf: {buf:?}");
+    // println!("buf: {buf:?}");
 
     // some packets may accumulate, therefore process all of them (happened especially for 0x0A)
     while let Ok(packet_id) = get_u8(&mut buf) {
@@ -220,6 +220,7 @@ async fn parse_packet(
             0x12 => {
                 let pid = get_i32(&mut buf)?;
                 let animation = get_u8(&mut buf)?;
+                // println!("animation: {animation}");
                 tx_animation
                     .send((pid, Animation::from(animation)))
                     .await
@@ -248,12 +249,14 @@ async fn parse_packet(
             }
 
             0x0F => {
-                println!("place");
                 let data = packet::PlayerBlockPlacementPacket::nested_deserialize(&mut buf)?;
-                tx_block_update
-                    .send(BlockUpdate::Place(data))
-                    .await
-                    .unwrap();
+                println!("place: {data:?}");
+                if data.item_id != -1 {
+                    tx_block_update
+                        .send(BlockUpdate::Place(data))
+                        .await
+                        .unwrap();
+                }
             }
 
             0x10 => {
@@ -264,6 +267,11 @@ async fn parse_packet(
             0x05 => {
                 let data = packet::PlayerInventoryPacket::nested_deserialize(&mut buf)?;
             }
+            
+            0x07 => {
+                let data = packet::UseEntityPacket::nested_deserialize(&mut buf)?;
+            }
+
 
             _ => {
                 println!("packet_id: {packet_id}");

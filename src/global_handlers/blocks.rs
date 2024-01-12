@@ -25,8 +25,6 @@ pub async fn block_updates(
         if let Ok(block_update) = rx_block_updates.recv().await {
             let (mut x, mut y, mut z, id, meta);
 
-            println!("block update");
-
             // check distance etc of player
 
             match block_update {

@@ -70,7 +70,7 @@ pub async fn login(
         let mut items = vec![None; count as usize];
         if id == -1 {
             items[1] = Some(Item {
-                item_id: 1, // 54: chest, 51: fire
+                item_id: 51, // 54: chest, 51: fire
                 count: 64,
                 uses: 0,
             });
