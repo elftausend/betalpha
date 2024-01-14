@@ -1,6 +1,9 @@
 use std::{
     io::Cursor,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use tokio::{
@@ -9,14 +12,14 @@ use tokio::{
 };
 
 use crate::{
-    get_id,
+    entities, get_id,
     packet::{self, util::SendPacket, Deserialize, Item, PacketError},
     world::{send_chunk, World},
-    Chunk, PositionAndLook, State, entities,
+    Chunk, PositionAndLook, State,
 };
 
 pub async fn login(
-    stream: &mut TcpStream,
+    stream: Arc<RwLock<TcpStream>>,
     buf: &mut Cursor<&[u8]>,
     spawn_chunks: &RwLock<World>,
     logged_in: &AtomicBool,
@@ -40,7 +43,7 @@ pub async fn login(
         map_seed: seed,
         dimension,
     };
-    login_response.send(stream).await?;
+    login_response.send(&mut *stream.write().await).await?;
 
     println!("protocol_version {protocol_version}");
     println!("username {username}");
@@ -52,7 +55,7 @@ pub async fn login(
     logged_in.store(true, Ordering::Relaxed);
 
     for chunk in spawn_chunks.read().await.chunks.values() {
-        send_chunk(chunk, stream).await.unwrap();
+        send_chunk(chunk, &mut *stream.write().await).await.unwrap();
     }
     println!("sent map");
 
@@ -61,7 +64,7 @@ pub async fn login(
         y: 80i32,
         z: 70i32,
     }
-    .send(stream)
+    .send(&mut *stream.write().await)
     .await?;
 
     println!("sent spawn");
@@ -80,7 +83,7 @@ pub async fn login(
             count,
             items,
         }
-        .send(stream)
+        .send(&mut *stream.write().await)
         .await?;
     }
 
@@ -105,7 +108,7 @@ pub async fn login(
         outer_state = (
             state.entity_id,
             state.position_and_look,
-            entities::Type::Player(state.username.clone()),
+            entities::Type::Player((state.username.clone(), Some(stream.clone()))),
         );
     }
     tx_entity
@@ -124,7 +127,7 @@ pub async fn login(
         pitch,
         on_ground,
     }
-    .send(stream)
+    .send(&mut *stream.write().await)
     .await?;
 
     println!("sent pos");

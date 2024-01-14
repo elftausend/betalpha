@@ -57,27 +57,30 @@ pub async fn spawn_entities(
 
             // let ty = ty.expect("must be sent");
             if let Some(ty) = ty {
-            match ty {
-                Type::Player(name) => {
-                    spawned_named_entity(&mut pos_update_stream, eid, &name, &now)
+                match ty {
+                    Type::Player((name, _)) => {
+                        spawned_named_entity(&mut pos_update_stream, eid, &name, &now)
+                            .await
+                            .unwrap()
+                    }
+                    Type::Item(item) => {
+                        to_server_packets::PickupSpawnPacket {
+                            entity_id: eid,
+                            item_id: item.item_id,
+                            count: item.count,
+                            x: ((now.x + 0.5) * 32.).round() as i32,
+                            y: (now.y * 32.).round() as i32,
+                            z: ((now.z + 0.5) * 32.).round() as i32,
+                            rotation: 0,
+                            pitch: 0,
+                            roll: 0,
+                        }
+                        .send(&mut pos_update_stream)
                         .await
-                        .unwrap()
-                }
-                Type::Item(item) => {
-                    to_server_packets::PickupSpawnPacket {
-                        entity_id: eid,
-                        item_id: item.item_id,
-                        count: item.count,
-                        x: ((now.x + 0.5) * 32.).round() as i32,
-                        y: (now.y * 32.).round() as i32,
-                        z: ((now.z +0.5) * 32.).round() as i32,
-                        rotation: 0,
-                        pitch: 0,
-                        roll: 0,
-                    }.send(&mut pos_update_stream).await.unwrap();
-                }
-            };
-        }
+                        .unwrap();
+                    }
+                };
+            }
 
             let mut entity_spawn = vec![0x1E];
             entity_spawn.extend_from_slice(&eid.to_be_bytes());

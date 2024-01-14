@@ -89,8 +89,7 @@ async fn main() {
     // let chunks = load_entire_world("/home/elftausend/.minecraft/saves/World1");
     // let chunks = &*Box::leak(chunks.into_boxed_slice());
 
-    let (tx_pos_and_look, rx_pos_and_look) =
-        mpsc::channel(256);
+    let (tx_pos_and_look, rx_pos_and_look) = mpsc::channel(256);
     let (tx_pos_and_look_update, _pos_and_look_update_rx) = broadcast::channel(256);
 
     let (tx_destroy_self_entity, rx_entity_destroy) = mpsc::channel::<i32>(100);
@@ -193,7 +192,7 @@ fn get_id() -> i32 {
 // TODO: add checking with peak (faster) [I won't do it]
 // TODO: use Arc rwlock
 async fn parse_packet(
-    stream: &mut TcpStream,
+    stream: Arc<RwLock<TcpStream>>,
     buf: &BytesMut,
     world: &RwLock<World>,
     state: &RwLock<State>,
@@ -213,12 +212,13 @@ async fn parse_packet(
     // some packets may accumulate, therefore process all of them (happened especially for 0x0A)
     while let Ok(packet_id) = get_u8(&mut buf) {
         match packet_id {
-            0 => keep_alive(&mut buf, stream).await?,
-            1 => login(stream, &mut buf, world, logged_in, state, tx_entity).await?,
+            0 => keep_alive(&mut buf, &mut *stream.write().await).await?,
+            1 => login(stream.clone(), &mut buf, world, logged_in, state, tx_entity).await?,
             // Handshake
             0x02 => {
                 // skip(&mut buf, 1)?;
                 let username = get_string(&mut buf)?;
+                let mut stream = stream.write().await;
                 stream.write_all(&[2, 0, 1, b'-']).await.unwrap();
                 stream.flush().await.unwrap();
                 println!("ch: {username:?}");
@@ -432,7 +432,7 @@ async fn handle_client(stream: TcpStream, world: Arc<RwLock<World>>, channels: C
 
     loop {
         if let Ok(n) = parse_packet(
-            &mut *stream.write().await,
+            stream.clone(),
             &buf,
             &world,
             &state,

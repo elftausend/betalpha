@@ -1,4 +1,6 @@
-use tokio::net::TcpStream;
+use std::sync::Arc;
+
+use tokio::{net::TcpStream, sync::RwLock};
 
 use crate::{
     packet::{self, util::SendPacket, Item},
@@ -8,7 +10,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Type {
-    Player(String),
+    Player((String, Option<Arc<RwLock<TcpStream>>>)),
     Item(Item),
 }
 

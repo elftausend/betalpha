@@ -10,12 +10,18 @@ pub use animations::*;
 mod blocks;
 pub use blocks::*;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, mpsc, RwLock},
+};
 
 use crate::{
-    entities, get_id, packet::{PlayerBlockPlacementPacket, Item}, world::BlockUpdate, PositionAndLook,
+    entities, get_id,
+    packet::{self, util::SendPacket, Item, PlayerBlockPlacementPacket},
+    world::BlockUpdate,
+    PositionAndLook,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub struct CollectionCenter {
     pub rx_pos_and_look: mpsc::Receiver<(i32, PositionAndLook, Option<entities::Type>)>,
@@ -61,12 +67,7 @@ pub async fn collection_center(
             if prev_pos_and_look.is_none() {
                 for (eid, pos_and_look) in &entity_positions {
                     tx_pos_and_look_update
-                        .send((
-                            *eid,
-                            Some(entity_type[eid].clone()),
-                            *pos_and_look,
-                            None,
-                        ))
+                        .send((*eid, Some(entity_type[eid].clone()), *pos_and_look, None))
                         .unwrap();
                 }
             }
@@ -74,7 +75,7 @@ pub async fn collection_center(
             tx_pos_and_look_update
                 .send((
                     eid,
-                    Some(entity_type[&eid].clone()), // could be none.. 
+                    Some(entity_type[&eid].clone()), // could be none..
                     // None,
                     pos_and_look,
                     prev_pos_and_look,
@@ -86,25 +87,30 @@ pub async fn collection_center(
             tx_broadcast_animations.send((eid, animation)).unwrap();
         }
 
-
         if let Ok(block_update) = rx_block_updates.try_recv() {
             match block_update {
                 BlockUpdate::Place(_) => {}
                 BlockUpdate::Break(block_info) => {
-                    let eid = get_id();
-                    let pos = PositionAndLook {
-                        x: block_info.x as f64,
-                        y: block_info.y as f64,
-                        z: block_info.z as f64,
-                        yaw: 0.,
-                        pitch: 0.,
-                    };
-                    entity_positions.insert(eid, pos);
-                    let item = entities::Type::Item(Item { item_id: block_info.item_id, count: 1, uses: 0});
-                    entity_type.insert(eid, item.clone());
-                    tx_pos_and_look_update
-                        .send((eid, Some(item), pos, None))
-                        .unwrap();
+                    if block_info.item_id != 0 {
+                        let eid = get_id();
+                        let pos = PositionAndLook {
+                            x: block_info.x as f64,
+                            y: block_info.y as f64,
+                            z: block_info.z as f64,
+                            yaw: 0.,
+                            pitch: 0.,
+                        };
+                        entity_positions.insert(eid, pos);
+                        let item = entities::Type::Item(Item {
+                            item_id: block_info.item_id,
+                            count: 1,
+                            uses: 0,
+                        });
+                        entity_type.insert(eid, item.clone());
+                        tx_pos_and_look_update
+                            .send((eid, Some(item), pos, None))
+                            .unwrap();
+                    }
                 }
             }
             tx_broadcast_block_updates.send(block_update).unwrap();
@@ -119,21 +125,51 @@ pub async fn collection_center(
         }
 
         // maybe use another container for items
-        for (eid, ty) in entity_type.iter() {
+        for (eid, ty) in entity_type.clone().iter() {
             let entities::Type::Item(item) = ty else {
-                continue
+                continue;
             };
             let pos = entity_positions[eid];
             for (check_collect_eid, check_pos) in &entity_positions {
                 if eid == check_collect_eid {
                     continue;
                 }
-                let entities::Type::Player(username) = entity_type[check_collect_eid].clone() else {
-                    continue
+
+                // if entity was removed in this loop before
+                let Some(ty) = entity_type.get(check_collect_eid) else {
+                    continue;
+                };
+
+                // maybe add player stream hashmap
+                let entities::Type::Player((username, mut stream)) = ty.clone() else {
+                    continue;
                 };
                 // https://www.spigotmc.org/threads/item-pickup-radius.337271/
                 if pos.distance(check_pos) < 2.04 {
+                    let mut stream = stream.as_mut().unwrap().write().await;
+
                     println!("{username} can collect {item:?}",);
+
+                    packet::CollectItemPacket {
+                        collected_entity_id: *eid,
+                        collector_entity_id: *check_collect_eid,
+                    }
+                    .send(&mut *stream)
+                    .await
+                    .unwrap();
+
+                    packet::AddToInventoryPacket {
+                        item_type: item.item_id,
+                        count: item.count,
+                        life: item.uses,
+                    }
+                    .send(&mut *stream)
+                    .await
+                    .unwrap();
+
+                    tx_destroy_entities.send(*eid).unwrap();
+
+                    entity_type.remove(eid);
                 }
             }
         }

@@ -3,6 +3,7 @@ use std::io::Cursor;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::{
+    entities,
     global_handlers::Animation,
     movement::tx_crouching_animation,
     packet::{
@@ -10,7 +11,7 @@ use crate::{
         util::{get_f32, get_u8},
         Deserialize, PacketError,
     },
-    PositionAndLook, State, entities,
+    PositionAndLook, State,
 };
 
 pub async fn player_position(

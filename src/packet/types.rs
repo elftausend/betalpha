@@ -135,9 +135,9 @@ mod to_client_packets {
     #[serialize(0x11)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct AddToInventoryPacket {
-        pub item_type: u16,
-        pub count: u8,
-        pub life: u16,
+        pub item_type: i16,
+        pub count: i8,
+        pub life: i16,
     }
     #[serialize(0x12)]
     #[derive(Debug, Clone, Deserialize)]
@@ -173,8 +173,8 @@ mod to_client_packets {
     #[serialize(0x16)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct CollectItemPacket {
-        pub collected_entity_id: u32,
-        pub collector_entity_id: u32,
+        pub collected_entity_id: i32,
+        pub collector_entity_id: i32,
     }
     #[serialize(0x17)]
     #[derive(Debug, Clone, Deserialize)]
