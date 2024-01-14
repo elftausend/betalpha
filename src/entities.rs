@@ -1,7 +1,7 @@
 use tokio::net::TcpStream;
 
 use crate::{
-    packet::{self, util::SendPacket},
+    packet::{self, util::SendPacket, Item},
     utils::look_to_i8_range,
     PositionAndLook,
 };
@@ -9,6 +9,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum Type {
     Player(String),
+    Item(Item),
 }
 
 pub async fn spawned_named_entity(

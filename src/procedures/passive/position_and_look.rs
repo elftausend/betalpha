@@ -10,13 +10,13 @@ use crate::{
         util::{get_f32, get_u8},
         Deserialize, PacketError,
     },
-    PositionAndLook, State,
+    PositionAndLook, State, entities,
 };
 
 pub async fn player_position(
     buf: &mut Cursor<&[u8]>,
     state: &RwLock<State>,
-    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<entities::Type>)>,
     tx_animation: &mpsc::Sender<(i32, Animation)>,
 ) -> Result<(), PacketError> {
     let packet::PlayerPositionPacket {
@@ -54,7 +54,7 @@ pub async fn player_position(
 pub async fn player_look(
     buf: &mut Cursor<&[u8]>,
     state: &RwLock<State>,
-    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<entities::Type>)>,
 ) -> Result<(), PacketError> {
     let yaw = get_f32(buf)?;
     let pitch = get_f32(buf)?;
@@ -82,7 +82,7 @@ pub async fn player_look(
 pub async fn player_position_and_look(
     buf: &mut Cursor<&[u8]>,
     state: &RwLock<State>,
-    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<entities::Type>)>,
     tx_animation: &mpsc::Sender<(i32, Animation)>,
 ) -> Result<(), PacketError> {
     let packet::PlayerPositionLookPacket {

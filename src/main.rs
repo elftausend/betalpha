@@ -25,7 +25,7 @@ use tokio::{
         RwLock,
     },
 };
-use world::{load_demo::load_entire_world, BlockUpdate, Chunk};
+use world::{load_demo::load_entire_world, BlockUpdate, Chunk, World};
 
 // if other clients want to interact with this client
 mod global_handlers;
@@ -74,10 +74,23 @@ async fn main() {
 
     // let mut chunks = Vec::new();
 
+    // temp
     let chunks = load_entire_world("./World2/");
-    let chunks = &*Box::leak(chunks.into_boxed_slice());
+    let chunks_lookup = chunks
+        .iter()
+        .cloned()
+        .map(|chunk| ((chunk.chunk_x, chunk.chunk_z), chunk))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let world = Arc::new(RwLock::new(World {
+        chunks: chunks_lookup,
+    }));
+
+    // let chunks = load_entire_world("/home/elftausend/.minecraft/saves/World1");
+    // let chunks = &*Box::leak(chunks.into_boxed_slice());
+
     let (tx_pos_and_look, rx_pos_and_look) =
-        mpsc::channel::<(i32, PositionAndLook, Option<String>)>(256);
+        mpsc::channel(256);
     let (tx_pos_and_look_update, _pos_and_look_update_rx) = broadcast::channel(256);
 
     let (tx_destroy_self_entity, rx_entity_destroy) = mpsc::channel::<i32>(100);
@@ -120,25 +133,31 @@ async fn main() {
             rx_global_block_update: tx_broadcast_block_updates.subscribe(),
         };
 
+        let world = world.clone();
+
         let stream = listener.accept().await.unwrap();
         tokio::spawn(async move {
             let rx_entity_movement = &mut channels.rx_entity_movement;
             let rx_destroy_entities = &mut channels.rx_destroy_entities;
+            let rx_global_animations = &mut channels.rx_global_animations;
+            let rx_global_block_update = &mut channels.rx_global_block_update;
 
             // used to clear the prevoius buffered moves ..
             while rx_entity_movement.try_recv().err() != Some(TryRecvError::Empty) {}
+            while rx_global_animations.try_recv().err() != Some(TryRecvError::Empty) {}
+            while rx_global_block_update.try_recv().err() != Some(TryRecvError::Empty) {}
             while rx_destroy_entities.try_recv().err() != Some(TryRecvError::Empty) {}
 
-            handle_client(stream.0, chunks, channels).await;
+            handle_client(stream.0, world, channels).await;
         });
     }
 }
 
 pub struct Channels {
-    tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_player_pos_and_look: mpsc::Sender<(i32, PositionAndLook, Option<entities::Type>)>,
     rx_entity_movement: broadcast::Receiver<(
         i32,
-        entities::Type,
+        Option<entities::Type>,
         PositionAndLook,
         Option<PositionAndLook>,
     )>,
@@ -176,9 +195,9 @@ fn get_id() -> i32 {
 async fn parse_packet(
     stream: &mut TcpStream,
     buf: &BytesMut,
-    chunks: &[Chunk],
+    world: &RwLock<World>,
     state: &RwLock<State>,
-    tx_entity: &Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &Sender<(i32, PositionAndLook, Option<entities::Type>)>,
     tx_disconnect: &Sender<i32>,
     tx_animation: &Sender<(i32, Animation)>,
     tx_block_update: &Sender<BlockUpdate>,
@@ -195,7 +214,7 @@ async fn parse_packet(
     while let Ok(packet_id) = get_u8(&mut buf) {
         match packet_id {
             0 => keep_alive(&mut buf, stream).await?,
-            1 => login(stream, &mut buf, &chunks, logged_in, state, tx_entity).await?,
+            1 => login(stream, &mut buf, world, logged_in, state, tx_entity).await?,
             // Handshake
             0x02 => {
                 // skip(&mut buf, 1)?;
@@ -241,8 +260,33 @@ async fn parse_packet(
                 let data = packet::PlayerDiggingPacket::nested_deserialize(&mut buf)?;
                 // block broken
                 if data.status == 3 {
+                    let local_x = if data.x >= 0 {
+                        data.x % 16
+                    } else {
+                        (data.x % 16 + 16) % 16
+                    };
+                    let local_z = if data.z >= 0 {
+                        data.z % 16
+                    } else {
+                        (data.z % 16 + 16) % 16
+                    };
+
+                    // two's complement
+                    let (chunk_x, chunk_z) = (data.x >> 4, data.z >> 4);
+
+                    let world = world.read().await;
+                    let chunk = world.chunks.get(&(chunk_x, chunk_z)).unwrap();
+                    let idx = (data.y as i32 + (local_z * 128 + (local_x * 128 * 16))) as usize;
+                    let item_id = chunk.blocks[idx] as i16;
+
                     tx_block_update
-                        .send(BlockUpdate::Break((data.x, data.y, data.z)))
+                        .send(BlockUpdate::Break(PlayerBlockPlacementPacket {
+                            item_id,
+                            x: data.x,
+                            y: data.y,
+                            z: data.z,
+                            face: data.face,
+                        }))
                         .await
                         .unwrap();
                 }
@@ -267,11 +311,10 @@ async fn parse_packet(
             0x05 => {
                 let data = packet::PlayerInventoryPacket::nested_deserialize(&mut buf)?;
             }
-            
+
             0x07 => {
                 let data = packet::UseEntityPacket::nested_deserialize(&mut buf)?;
             }
-
 
             _ => {
                 println!("packet_id: {packet_id}");
@@ -301,7 +344,14 @@ pub struct PositionAndLook {
     pitch: f32,
 }
 
-async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) {
+impl PositionAndLook {
+    #[inline]
+    pub fn distance(&self, rhs: &PositionAndLook) -> f64 {
+        ((self.x - rhs.x).powi(2) + (self.y - rhs.y).powi(2) + (self.z - rhs.z).powi(2)).sqrt()
+    }
+}
+
+async fn handle_client(stream: TcpStream, world: Arc<RwLock<World>>, channels: Channels) {
     let mut buf = BytesMut::with_capacity(SIZE);
 
     let Channels {
@@ -384,7 +434,7 @@ async fn handle_client(stream: TcpStream, chunks: &[Chunk], channels: Channels) 
         if let Ok(n) = parse_packet(
             &mut *stream.write().await,
             &buf,
-            chunks,
+            &world,
             &state,
             &tx_player_pos_and_look,
             &tx_destroy_self_entity,

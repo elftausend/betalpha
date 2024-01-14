@@ -1,3 +1,4 @@
+use nbt::Map;
 use tokio::net::TcpStream;
 
 use crate::packet::{self, util::SendPacket, PacketError, PlayerBlockPlacementPacket};
@@ -6,10 +7,15 @@ pub mod load_demo;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BlockUpdate {
-    Place(PlayerBlockPlacementPacket),
-    Break((i32, i8, i32)),
+    Place(PlayerBlockPlacementPacket), // use block struct or something
+    Break(PlayerBlockPlacementPacket),
 }
 
+pub struct World {
+    pub chunks: std::collections::HashMap<(i32, i32), Chunk>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Chunk {
     pub chunk_x: i32,
     pub chunk_z: i32,

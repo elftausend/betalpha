@@ -14,6 +14,7 @@ use tokio::{
 
 use crate::{
     entities::{self, spawned_named_entity, Type},
+    packet::{to_server_packets, util::SendPacket},
     utils::look_to_i8_range,
     PositionAndLook, State,
 };
@@ -23,7 +24,7 @@ pub async fn spawn_entities(
     state_pos_update: Arc<RwLock<State>>,
     mut rx_entity_movement: broadcast::Receiver<(
         i32,
-        Type,
+        Option<Type>,
         PositionAndLook,
         Option<PositionAndLook>,
     )>,
@@ -54,13 +55,29 @@ pub async fn spawn_entities(
         if !seen_before.contains(&eid) {
             let mut pos_update_stream = pos_update_stream.write().await;
 
+            // let ty = ty.expect("must be sent");
+            if let Some(ty) = ty {
             match ty {
-                entities::Type::Player(name) => {
+                Type::Player(name) => {
                     spawned_named_entity(&mut pos_update_stream, eid, &name, &now)
                         .await
                         .unwrap()
                 }
+                Type::Item(item) => {
+                    to_server_packets::PickupSpawnPacket {
+                        entity_id: eid,
+                        item_id: item.item_id,
+                        count: item.count,
+                        x: ((now.x + 0.5) * 32.).round() as i32,
+                        y: (now.y * 32.).round() as i32,
+                        z: ((now.z +0.5) * 32.).round() as i32,
+                        rotation: 0,
+                        pitch: 0,
+                        roll: 0,
+                    }.send(&mut pos_update_stream).await.unwrap();
+                }
             };
+        }
 
             let mut entity_spawn = vec![0x1E];
             entity_spawn.extend_from_slice(&eid.to_be_bytes());

@@ -45,10 +45,10 @@ pub async fn block_updates(
                     // meta = block_info.face
                     meta = 0;
                 }
-                BlockUpdate::Break((break_x, break_y, break_z)) => {
-                    x = break_x;
-                    y = break_y;
-                    z = break_z;
+                BlockUpdate::Break(block_info) => {
+                    x = block_info.x;
+                    y = block_info.y;
+                    z = block_info.z;
                     id = 0;
                     meta = 0;
                 }

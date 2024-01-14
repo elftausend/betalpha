@@ -442,13 +442,13 @@ pub mod to_server_packets {
         pub on_ground: bool,
     }
     #[serialize(0x0E)]
-    #[derive(Debug, Clone, Deserialize)]
+    #[derive(Debug, Clone, Copy, Deserialize)]
     pub struct PlayerDiggingPacket {
         pub status: u8,
         pub x: i32,
         pub y: i8,
         pub z: i32,
-        pub face: u8,
+        pub face: i8,
     }
     #[serialize(0x0F)]
     #[derive(Debug, Clone, Copy, Deserialize)]
@@ -474,9 +474,9 @@ pub mod to_server_packets {
     #[serialize(0x15)]
     #[derive(Debug, Clone, Deserialize)]
     pub struct PickupSpawnPacket {
-        pub entity_id: u32,
-        pub item_id: u16,
-        pub count: u8,
+        pub entity_id: i32,
+        pub item_id: i16,
+        pub count: i8,
         pub x: i32,
         pub y: i32,
         pub z: i32,

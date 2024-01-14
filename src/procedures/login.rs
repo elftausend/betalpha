@@ -11,17 +11,17 @@ use tokio::{
 use crate::{
     get_id,
     packet::{self, util::SendPacket, Deserialize, Item, PacketError},
-    world::send_chunk,
-    Chunk, PositionAndLook, State,
+    world::{send_chunk, World},
+    Chunk, PositionAndLook, State, entities,
 };
 
 pub async fn login(
     stream: &mut TcpStream,
     buf: &mut Cursor<&[u8]>,
-    spawn_chunks: &[Chunk],
+    spawn_chunks: &RwLock<World>,
     logged_in: &AtomicBool,
     state: &RwLock<State>,
-    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<String>)>,
+    tx_entity: &mpsc::Sender<(i32, PositionAndLook, Option<entities::Type>)>,
 ) -> Result<(), PacketError> {
     let login_request = packet::LoginRequestPacket::nested_deserialize(buf)?;
     let protocol_version = login_request.protocol_version;
@@ -51,7 +51,7 @@ pub async fn login(
     }
     logged_in.store(true, Ordering::Relaxed);
 
-    for chunk in spawn_chunks.iter() {
+    for chunk in spawn_chunks.read().await.chunks.values() {
         send_chunk(chunk, stream).await.unwrap();
     }
     println!("sent map");
@@ -105,11 +105,11 @@ pub async fn login(
         outer_state = (
             state.entity_id,
             state.position_and_look,
-            Some(state.username.clone()),
+            entities::Type::Player(state.username.clone()),
         );
     }
     tx_entity
-        .send((outer_state.0, outer_state.1, outer_state.2))
+        .send((outer_state.0, outer_state.1, Some(outer_state.2)))
         .await
         .unwrap();
 
