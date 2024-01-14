@@ -25,7 +25,7 @@ use tokio::{
         RwLock,
     },
 };
-use world::{load_demo::load_entire_world, BlockUpdate, Chunk, World};
+use world::{load_demo::load_entire_world, BlockUpdate, World};
 
 // if other clients want to interact with this client
 mod global_handlers;
@@ -304,16 +304,16 @@ async fn parse_packet(
             }
 
             0x10 => {
-                let data = packet::HoldingChangePacket::nested_deserialize(&mut buf)?;
+                let _data = packet::HoldingChangePacket::nested_deserialize(&mut buf)?;
             }
 
             // client inv
             0x05 => {
-                let data = packet::PlayerInventoryPacket::nested_deserialize(&mut buf)?;
+                let _data = packet::PlayerInventoryPacket::nested_deserialize(&mut buf)?;
             }
 
             0x07 => {
-                let data = packet::UseEntityPacket::nested_deserialize(&mut buf)?;
+                let _data = packet::UseEntityPacket::nested_deserialize(&mut buf)?;
             }
 
             _ => {

@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use crate::{
-    entities::{self, spawned_named_entity, Type},
+    entities::{spawned_named_entity, Type},
     packet::{to_server_packets, util::SendPacket},
     utils::look_to_i8_range,
     PositionAndLook, State,

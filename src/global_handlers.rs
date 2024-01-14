@@ -11,17 +11,16 @@ mod blocks;
 pub use blocks::*;
 
 use tokio::{
-    net::TcpStream,
-    sync::{broadcast, mpsc, RwLock},
+    sync::{broadcast, mpsc},
 };
 
 use crate::{
     entities, get_id,
-    packet::{self, util::SendPacket, Item, PlayerBlockPlacementPacket},
+    packet::{self, util::SendPacket, Item},
     world::BlockUpdate,
     PositionAndLook,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap};
 
 pub struct CollectionCenter {
     pub rx_pos_and_look: mpsc::Receiver<(i32, PositionAndLook, Option<entities::Type>)>,
@@ -154,7 +153,7 @@ pub async fn collection_center(
                         collected_entity_id: *eid,
                         collector_entity_id: *check_collect_eid,
                     }
-                    .send(&mut *stream)
+                    .send(&mut stream)
                     .await
                     .unwrap();
 
@@ -163,7 +162,7 @@ pub async fn collection_center(
                         count: item.count,
                         life: item.uses,
                     }
-                    .send(&mut *stream)
+                    .send(&mut stream)
                     .await
                     .unwrap();
 

@@ -14,7 +14,7 @@ use crate::{
 pub async fn block_updates(
     logged_in: Arc<AtomicBool>,
     mut rx_block_updates: broadcast::Receiver<BlockUpdate>,
-    state: Arc<RwLock<State>>,
+    _state: Arc<RwLock<State>>,
     stream: Arc<RwLock<TcpStream>>,
 ) {
     loop {

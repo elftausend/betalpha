@@ -15,10 +15,10 @@ impl<P: Serialize> SendPacket for P {
         stream
             .write_all(&self.serialize()?)
             .await
-            .map_err(|e| PacketError::IOError(e))?;
+            .map_err(PacketError::IOError)?;
 
         // consider not flushing
-        stream.flush().await.map_err(|e| PacketError::IOError(e))
+        stream.flush().await.map_err(PacketError::IOError)
     }
 }
 

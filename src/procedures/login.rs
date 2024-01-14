@@ -14,8 +14,7 @@ use tokio::{
 use crate::{
     entities, get_id,
     packet::{self, util::SendPacket, Deserialize, Item, PacketError},
-    world::{send_chunk, World},
-    Chunk, PositionAndLook, State,
+    world::{send_chunk, World}, PositionAndLook, State,
 };
 
 pub async fn login(
