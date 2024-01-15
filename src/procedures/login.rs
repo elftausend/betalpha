@@ -14,7 +14,8 @@ use tokio::{
 use crate::{
     entities, get_id,
     packet::{self, util::SendPacket, Deserialize, Item, PacketError},
-    world::{send_chunk, World}, PositionAndLook, State,
+    world::{send_chunk, World},
+    PositionAndLook, State,
 };
 
 pub async fn login(
@@ -72,7 +73,7 @@ pub async fn login(
         let mut items = vec![None; count as usize];
         if id == -1 {
             items[1] = Some(Item {
-                item_id: 51, // 54: chest, 51: fire
+                item_id: 3, // 54: chest, 51: fire
                 count: 64,
                 uses: 0,
             });

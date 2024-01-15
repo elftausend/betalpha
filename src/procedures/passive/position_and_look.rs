@@ -46,7 +46,7 @@ pub async fn player_position(
     tx_entity
         .send((outer_state.0, outer_state.1, None))
         .await
-        .unwrap();
+        .unwrap_or_default();
     // println!("{x} {y} {stance} {z} {on_ground}");
 
     Ok(())
@@ -115,11 +115,11 @@ pub async fn player_position_and_look(
 
     tx_crouching_animation(eid, stance, y, tx_animation, state)
         .await
-        .unwrap();
+        .unwrap_or_default();
     tx_entity
         .send((outer_state.0, outer_state.1, None))
         .await
-        .unwrap();
+        .unwrap_or_default();
 
     // println!("{x} {y} {stance} {z} {yaw} {pitch} {on_ground}");
 

@@ -260,16 +260,8 @@ async fn parse_packet(
                 let data = packet::PlayerDiggingPacket::nested_deserialize(&mut buf)?;
                 // block broken
                 if data.status == 3 {
-                    let local_x = if data.x >= 0 {
-                        data.x % 16
-                    } else {
-                        (data.x % 16 + 16) % 16
-                    };
-                    let local_z = if data.z >= 0 {
-                        data.z % 16
-                    } else {
-                        (data.z % 16 + 16) % 16
-                    };
+                    let local_x = data.x & 15;
+                    let local_z = data.z & 15;
 
                     // two's complement
                     let (chunk_x, chunk_z) = (data.x >> 4, data.z >> 4);

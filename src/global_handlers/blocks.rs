@@ -8,7 +8,7 @@ use tokio::{
 use crate::{
     packet::{self, util::SendPacket},
     world::BlockUpdate,
-    State,
+    PositionAndLook, State,
 };
 
 pub async fn block_updates(
@@ -40,6 +40,16 @@ pub async fn block_updates(
                         4 => x -= 1,
                         5 => x += 1,
                         _ => {}
+                    }
+                    let player_pos = _state.read().await.position_and_look;
+
+                    let dx = (x as f64 - player_pos.x).abs();
+                    let dy = (y as f64 - player_pos.y).abs();
+                    let dy2 = (y as f64 - player_pos.y - 1.).abs();
+                    let dz = (z as f64 - player_pos.z).abs();
+
+                    if dx < 1. && (dy < 1. || dy2 < 1.) && dz < 1.{
+                        continue;
                     }
                     id = block_info.item_id as i8;
                     // meta = block_info.face

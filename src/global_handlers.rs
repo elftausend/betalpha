@@ -10,9 +10,7 @@ pub use animations::*;
 mod blocks;
 pub use blocks::*;
 
-use tokio::{
-    sync::{broadcast, mpsc},
-};
+use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     entities, get_id,
@@ -20,7 +18,7 @@ use crate::{
     world::BlockUpdate,
     PositionAndLook,
 };
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 pub struct CollectionCenter {
     pub rx_pos_and_look: mpsc::Receiver<(i32, PositionAndLook, Option<entities::Type>)>,
@@ -66,7 +64,7 @@ pub async fn collection_center(
             if prev_pos_and_look.is_none() {
                 for (eid, pos_and_look) in &entity_positions {
                     tx_pos_and_look_update
-                        .send((*eid, Some(entity_type[eid].clone()), *pos_and_look, None))
+                        .send((*eid, entity_type.get(eid).cloned(), *pos_and_look, None))
                         .unwrap();
                 }
             }
@@ -90,6 +88,7 @@ pub async fn collection_center(
             match block_update {
                 BlockUpdate::Place(_) => {}
                 BlockUpdate::Break(block_info) => {
+                    // id should not be 0, this may happen because the chunks aren't updated at moment when placing a block therefore maybe returning air
                     if block_info.item_id != 0 {
                         let eid = get_id();
                         let pos = PositionAndLook {
